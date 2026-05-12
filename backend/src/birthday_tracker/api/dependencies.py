@@ -41,33 +41,48 @@ def get_app_settings(request: Request) -> Settings:
 
 
 def get_contact_repository(
-    settings: Annotated[Settings, Depends(get_app_settings)],
+    request: Request,
 ) -> ContactRepository:
-    """Build the production :class:`ContactRepository` (Firestore).
+    """Return the active :class:`ContactRepository`.
 
-    Tests override this dependency with an in-memory repository.
+    In development mode the app stores a singleton
+    :class:`~birthday_tracker.adapters.InMemoryContactRepository` on
+    ``app.state`` so the server works without GCP credentials.  In staging
+    and production a new :class:`FirestoreContactRepository` is built per
+    request.
+
+    Tests override this dependency via ``app.dependency_overrides``.
 
     Args:
-        settings: Process settings (project ID, emulator host).
+        request: Incoming request; the repo may live on ``request.app.state``.
 
     Returns:
-        A :class:`FirestoreContactRepository` ready for I/O.
+        A concrete :class:`ContactRepository`.
     """
+    if request.app.state.contact_repo is not None:
+        return request.app.state.contact_repo  # type: ignore[no-any-return]
+    settings: Settings = request.app.state.settings
     client = build_async_client(project_id=settings.gcp_project_id)
     return FirestoreContactRepository(client=client)
 
 
 def get_collection_request_repository(
-    settings: Annotated[Settings, Depends(get_app_settings)],
+    request: Request,
 ) -> CollectionRequestRepository:
-    """Build the production :class:`CollectionRequestRepository` (Firestore).
+    """Return the active :class:`CollectionRequestRepository`.
+
+    Mirrors :func:`get_contact_repository` — uses the in-memory singleton in
+    development, Firestore otherwise.
 
     Args:
-        settings: Process settings.
+        request: Incoming request.
 
     Returns:
-        A :class:`FirestoreCollectionRequestRepository`.
+        A concrete :class:`CollectionRequestRepository`.
     """
+    if request.app.state.collection_request_repo is not None:
+        return request.app.state.collection_request_repo  # type: ignore[no-any-return]
+    settings: Settings = request.app.state.settings
     client = build_async_client(project_id=settings.gcp_project_id)
     return FirestoreCollectionRequestRepository(client=client)
 
