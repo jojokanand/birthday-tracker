@@ -60,6 +60,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             InMemoryCollectionRequestRepository,
             InMemoryContactRepository,
         )
+
         app.state.contact_repo = InMemoryContactRepository()
         app.state.collection_request_repo = InMemoryCollectionRequestRepository()
     else:
@@ -69,11 +70,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Allow the frontend to make cross-origin requests from the browser.
     # In development/staging any origin is permitted; in production only the
     # dashboard origin is allowed so browsers enforce the restriction.
-    cors_origins = (
-        ["*"]
-        if settings.app_env != AppEnv.production
-        else [settings.public_base_url]
-    )
+    cors_origins = ["*"] if settings.app_env != AppEnv.production else [settings.public_base_url]
     app.add_middleware(
         CORSMiddleware,
         allow_origins=cors_origins,
