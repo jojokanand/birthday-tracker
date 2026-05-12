@@ -95,6 +95,24 @@ Domain models
    :undoc-members:
    :show-inheritance:
 
+.. autopydantic_model:: birthday_tracker.models.user.User
+   :model-show-json: False
+   :model-show-config-summary: False
+
+Authentication
+--------------
+
+.. autoclass:: birthday_tracker.core.auth.Identity
+   :members:
+   :show-inheritance:
+   :no-index:
+
+.. autofunction:: birthday_tracker.core.auth.verify_firebase_id_token
+
+.. autofunction:: birthday_tracker.core.auth.dev_identity
+
+.. autofunction:: birthday_tracker.api.dependencies.require_user
+
 Token primitives
 ----------------
 

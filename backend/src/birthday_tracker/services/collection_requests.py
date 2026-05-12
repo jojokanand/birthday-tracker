@@ -126,25 +126,38 @@ class CollectionRequestService:
         self.token_ttl_seconds = token_ttl_seconds
         self.public_base_url = public_base_url.rstrip("/")
 
-    async def issue(self, *, contact_id: UUID, channel: Channel, destination: str) -> IssuedRequest:
-        """Mint a fresh token and persist a pending request.
+    async def issue(
+        self,
+        *,
+        contact_id: UUID,
+        channel: Channel,
+        destination: str,
+        owner_id: str,
+    ) -> IssuedRequest:
+        """Mint a fresh token and persist a pending request for ``owner_id``.
 
         Args:
             contact_id: ID of the existing contact this request is for.
             channel: Whether the link will be delivered by SMS or email.
             destination: The phone or email address the link is sent to.
+            owner_id: Firebase ``uid`` of the issuing user. The contact must
+                already belong to this owner — otherwise the lookup returns
+                ``None`` and :class:`ContactNotFound` is raised, regardless
+                of whether the contact exists under a different owner.
 
         Returns:
             An :class:`IssuedRequest` with the persisted record + raw token + URL.
 
         Raises:
-            ContactNotFound: If no contact with ``contact_id`` exists.
+            ContactNotFound: If no contact with ``contact_id`` exists for
+                ``owner_id``.
         """
-        contact = await self.contacts.get(contact_id)
+        contact = await self.contacts.get(contact_id, owner_id)
         if contact is None:
             raise ContactNotFound(str(contact_id))
 
         request = CollectionRequest(
+            owner_id=owner_id,
             contact_id=contact.id,
             channel=channel,
             destination=destination,
@@ -205,7 +218,9 @@ class CollectionRequestService:
                 between issue and fulfill.
         """
         request = await self.lookup(token)
-        contact = await self.contacts.get(request.contact_id)
+        # The token itself is the bearer credential — we trust the request's
+        # owner_id to scope the contact lookup and save.
+        contact = await self.contacts.get(request.contact_id, request.owner_id)
         if contact is None:
             raise ContactNotFound(str(request.contact_id))
 

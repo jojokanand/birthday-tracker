@@ -7,6 +7,11 @@
  * @module
  */
 
+"use client";
+
+import * as React from "react";
+import { useSearchParams } from "next/navigation";
+import { AuthGuard } from "@/components/auth-guard";
 import {
   Card,
   CardContent,
@@ -15,42 +20,50 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { IssueRequestForm } from "@/components/issue-request-form";
-import { apiClient } from "@/lib/api";
+import { useApiClient } from "@/lib/api-client";
+import { useAuth } from "@/lib/auth-context";
 import type { ContactResponse } from "@/lib/format";
-
-/** Always render at request time — this page reads live backend data. */
-export const dynamic = "force-dynamic";
-
-async function fetchContacts(): Promise<ContactResponse[]> {
-  const { data, error } = await apiClient.GET("/contacts", {
-    fetch: (input: RequestInfo | URL, init?: RequestInit) =>
-      fetch(input, { ...init, cache: "no-store" }),
-  });
-  if (error) return [];
-  return data ?? [];
-}
-
-/**
- * Props injected by Next.js App Router for pages with search params.
- */
-interface PageProps {
-  searchParams: Promise<{ contact_id?: string }>;
-}
 
 /**
  * Collection request page.
  *
- * Loads the full contact list server-side, then hands off rendering to the
- * interactive {@link IssueRequestForm} Client Component.
+ * Loads the caller's contact list client-side, then renders the
+ * interactive {@link IssueRequestForm}.
  */
-export default async function NewCollectionRequestPage({
-  searchParams,
-}: PageProps) {
-  const [contacts, params] = await Promise.all([
-    fetchContacts(),
-    searchParams,
-  ]);
-  const initialContactId = params.contact_id;
+export default function NewCollectionRequestPage() {
+  return (
+    <AuthGuard>
+      <NewCollectionRequestContent />
+    </AuthGuard>
+  );
+}
+
+function NewCollectionRequestContent() {
+  const api = useApiClient();
+  const { user } = useAuth();
+  const searchParams = useSearchParams();
+  const initialContactId = searchParams.get("contact_id") ?? undefined;
+
+  const [contacts, setContacts] = React.useState<ContactResponse[]>([]);
+  const [loading, setLoading] = React.useState(true);
+
+  React.useEffect(() => {
+    if (!user) return;
+    let alive = true;
+    (async () => {
+      const { data, error } = await api.GET("/contacts", {});
+      if (!alive) return;
+      setContacts(error ? [] : (data ?? []));
+      setLoading(false);
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [api, user]);
+
+  if (loading) {
+    return <div className="text-sm text-muted-foreground">Loading…</div>;
+  }
 
   return (
     <div className="space-y-6">

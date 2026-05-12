@@ -39,15 +39,44 @@ async def test_delete_missing(firestore_repo: FirestoreContactRepository) -> Non
 
 
 @pytest.mark.integration
-async def test_list_all_empty(firestore_repo: FirestoreContactRepository) -> None:
-    await contract.assert_list_all_empty(firestore_repo)
+async def test_list_for_owner_empty(firestore_repo: FirestoreContactRepository) -> None:
+    await contract.assert_list_for_owner_empty(firestore_repo)
 
 
 @pytest.mark.integration
-async def test_list_all_returns_inserted(firestore_repo: FirestoreContactRepository) -> None:
-    await contract.assert_list_all_returns_inserted(firestore_repo)
+async def test_list_for_owner_returns_inserted(
+    firestore_repo: FirestoreContactRepository,
+) -> None:
+    await contract.assert_list_for_owner_returns_inserted(firestore_repo)
 
 
 @pytest.mark.integration
 async def test_mutation_isolation(firestore_repo: FirestoreContactRepository) -> None:
     await contract.assert_mutation_does_not_leak_into_store(firestore_repo)
+
+
+# ----- Cross-tenant isolation -------------------------------------------
+
+
+@pytest.mark.integration
+async def test_get_filters_by_owner(firestore_repo: FirestoreContactRepository) -> None:
+    await contract.assert_get_filters_by_owner(firestore_repo)
+
+
+@pytest.mark.integration
+async def test_delete_filters_by_owner(firestore_repo: FirestoreContactRepository) -> None:
+    await contract.assert_delete_filters_by_owner(firestore_repo)
+
+
+@pytest.mark.integration
+async def test_list_for_owner_isolates_tenants(
+    firestore_repo: FirestoreContactRepository,
+) -> None:
+    await contract.assert_list_for_owner_isolates_tenants(firestore_repo)
+
+
+@pytest.mark.integration
+async def test_duplicate_details_across_tenants(
+    firestore_repo: FirestoreContactRepository,
+) -> None:
+    await contract.assert_duplicate_details_across_tenants_allowed(firestore_repo)

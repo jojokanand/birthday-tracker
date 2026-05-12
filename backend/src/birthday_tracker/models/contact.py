@@ -22,6 +22,9 @@ class Contact(BaseModel):
 
     Attributes:
         id: Stable identifier (UUID4) generated server-side at creation.
+        owner_id: Stable user identifier (Firebase ``uid``) of the owner who
+            created this contact. Set server-side from the authenticated
+            identity — never accepted from request bodies.
         full_name: Legal or commonly-used full name.
         preferred_name: Optional shorter / nickname used in greetings.
         email: Verified email address. Optional but at least one of
@@ -34,6 +37,7 @@ class Contact(BaseModel):
     """
 
     id: UUID = Field(default_factory=uuid4)
+    owner_id: str = Field(min_length=1, max_length=128)
     full_name: str = Field(min_length=1, max_length=200)
     preferred_name: str | None = Field(default=None, max_length=100)
     email: EmailStr | None = None

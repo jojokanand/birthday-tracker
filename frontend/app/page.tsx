@@ -1,13 +1,19 @@
 /**
  * Home page — upcoming birthdays within the next 30 days.
  *
- * Data is fetched server-side on every request so the list is always fresh.
+ * Client Component: data is loaded from the backend with the signed-in
+ * user's ID token. Wrapped in `<AuthGuard>` so anonymous visitors are
+ * sent to `/sign-in`.
  *
  * @module
  */
 
+"use client";
+
+import * as React from "react";
 import Link from "next/link";
 import { CalendarDays } from "lucide-react";
+import { AuthGuard } from "@/components/auth-guard";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
@@ -24,38 +30,59 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { apiClient } from "@/lib/api";
+import { useApiClient } from "@/lib/api-client";
+import { useAuth } from "@/lib/auth-context";
 import {
   formatBirthday,
   formatDaysUntilBirthday,
   type ContactResponse,
 } from "@/lib/format";
 
-/** Always render at request time — this page reads live backend data. */
-export const dynamic = "force-dynamic";
-
 /** Number of look-ahead days for the upcoming birthdays list. */
 const UPCOMING_DAYS = 30;
-
-async function fetchUpcoming(): Promise<ContactResponse[]> {
-  const { data, error } = await apiClient.GET("/contacts", {
-    params: { query: { upcoming_in_days: UPCOMING_DAYS } },
-    fetch: (input: RequestInfo | URL, init?: RequestInit) =>
-      fetch(input, { ...init, cache: "no-store" }),
-  });
-  if (error) return [];
-  return data ?? [];
-}
 
 /**
  * Upcoming birthdays dashboard page.
  *
  * Shows contacts whose birthday falls within the next {@link UPCOMING_DAYS}
- * days, ordered nearest-first.  Server-renders for fresh data on every
- * navigation.
+ * days, ordered nearest-first.
  */
-export default async function HomePage() {
-  const contacts = await fetchUpcoming();
+export default function HomePage() {
+  return (
+    <AuthGuard>
+      <HomeContent />
+    </AuthGuard>
+  );
+}
+
+/** Inner component rendered only after the user is signed in. */
+function HomeContent() {
+  const api = useApiClient();
+  const { user } = useAuth();
+  const [contacts, setContacts] = React.useState<ContactResponse[]>([]);
+  const [loading, setLoading] = React.useState(true);
+
+  React.useEffect(() => {
+    if (!user) return;
+    let alive = true;
+    (async () => {
+      const { data, error } = await api.GET("/contacts", {
+        params: { query: { upcoming_in_days: UPCOMING_DAYS } },
+      });
+      if (!alive) return;
+      setContacts(error ? [] : (data ?? []));
+      setLoading(false);
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [api, user]);
+
+  if (loading) {
+    return (
+      <div className="text-sm text-muted-foreground">Loading upcoming…</div>
+    );
+  }
 
   return (
     <div className="space-y-6">

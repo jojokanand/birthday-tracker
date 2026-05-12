@@ -18,11 +18,21 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY frontend/ .
 
-# NEXT_PUBLIC_API_URL must be baked in at build time (it becomes a client-side
-# constant). Supply it as a build-arg; defaults to the backend Cloud Run URL
-# placeholder that gets substituted in the deploy workflow.
+# NEXT_PUBLIC_* values must be baked in at build time — Next.js inlines
+# them into the client bundle. The deploy workflow forwards them as
+# --build-arg flags; defaults below are safe placeholders so the build
+# succeeds even before Firebase is configured.
 ARG NEXT_PUBLIC_API_URL=https://api.example.com
-ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+ARG NEXT_PUBLIC_FIREBASE_API_KEY=""
+ARG NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=""
+ARG NEXT_PUBLIC_FIREBASE_PROJECT_ID=""
+ARG NEXT_PUBLIC_FIREBASE_APP_ID=""
+
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL} \
+    NEXT_PUBLIC_FIREBASE_API_KEY=${NEXT_PUBLIC_FIREBASE_API_KEY} \
+    NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=${NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN} \
+    NEXT_PUBLIC_FIREBASE_PROJECT_ID=${NEXT_PUBLIC_FIREBASE_PROJECT_ID} \
+    NEXT_PUBLIC_FIREBASE_APP_ID=${NEXT_PUBLIC_FIREBASE_APP_ID}
 
 RUN npm run build
 

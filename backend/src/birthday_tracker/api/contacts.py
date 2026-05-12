@@ -1,14 +1,14 @@
 """Contacts CRUD router.
 
-Provides the owner-facing REST interface for managing contacts.  All routes
-require the caller to be the authenticated owner (stub until issue #7 wires
-real auth).
+Provides the owner-facing REST interface for managing contacts. Every
+route requires the caller to be an authenticated user, and all reads /
+writes are scoped to that user via :class:`~birthday_tracker.core.auth.Identity`.
 
 Routes
 ------
-GET    /contacts                 — list all contacts (optional upcoming filter)
-POST   /contacts                 — create a new contact
-GET    /contacts/{contact_id}    — fetch a single contact
+GET    /contacts                 — list the caller's contacts (optional upcoming filter)
+POST   /contacts                 — create a new contact owned by the caller
+GET    /contacts/{contact_id}    — fetch a single contact (must be owned by caller)
 PUT    /contacts/{contact_id}    — replace a contact's editable fields
 DELETE /contacts/{contact_id}    — remove a contact
 """
@@ -23,11 +23,11 @@ from fastapi import APIRouter, Depends, Query, status
 from pydantic import BaseModel, EmailStr, Field, model_validator
 
 from birthday_tracker.api.dependencies import (
-    OwnerIdentity,
     get_contact_repository,
-    require_owner,
+    require_user,
 )
 from birthday_tracker.api.errors import APIError
+from birthday_tracker.core.auth import Identity
 from birthday_tracker.models import Contact
 from birthday_tracker.models.address import Address
 from birthday_tracker.models.birthday import Birthday
@@ -42,7 +42,12 @@ router = APIRouter(prefix="/contacts", tags=["contacts"])
 
 
 class CreateContactBody(BaseModel):
-    """Request body for ``POST /contacts``."""
+    """Request body for ``POST /contacts``.
+
+    Note that ``owner_id`` is intentionally not a field — it is set
+    server-side from the authenticated identity so callers cannot
+    impersonate other users by spoofing it.
+    """
 
     full_name: str = Field(min_length=1, max_length=200, description="Full name.")
     preferred_name: str | None = Field(
@@ -87,6 +92,8 @@ class ContactResponse(BaseModel):
 
     Matches the :class:`Contact` fields but uses ``str`` for UUID/datetime
     so JSON serialization is explicit and stable across Python versions.
+    The ``owner_id`` is intentionally not exposed on the wire — callers
+    only ever see their own contacts so it carries no useful information.
     """
 
     id: UUID
@@ -171,11 +178,11 @@ def _build_response(contact: Contact) -> ContactResponse:
 @router.get(
     "",
     response_model=list[ContactResponse],
-    summary="List all contacts (owner only)",
+    summary="List the caller's contacts",
 )
 async def list_contacts(
     repo: Annotated[ContactRepository, Depends(get_contact_repository)],
-    _owner: Annotated[OwnerIdentity, Depends(require_owner())],
+    identity: Annotated[Identity, Depends(require_user)],
     upcoming_in_days: Annotated[
         int | None,
         Query(
@@ -189,11 +196,11 @@ async def list_contacts(
         ),
     ] = None,
 ) -> list[ContactResponse]:
-    """Return all contacts, optionally filtered to upcoming birthdays.
+    """Return the authenticated user's contacts, optionally filtered to upcoming birthdays.
 
     Args:
         repo: Injected :class:`ContactRepository`.
-        _owner: Authenticated owner identity (stub).
+        identity: Authenticated caller — scopes the listing to their data.
         upcoming_in_days: Optional filter: only contacts with a birthday
             within the next ``upcoming_in_days`` calendar days are returned.
             Contacts without a birthday are omitted when this filter is active.
@@ -203,7 +210,7 @@ async def list_contacts(
         ``days_until_birthday`` when ``upcoming_in_days`` is set, otherwise
         by ascending ``full_name``.
     """
-    contacts = await repo.list_all()
+    contacts = await repo.list_for_owner(identity.user_id)
     responses = [_build_response(c) for c in contacts]
 
     if upcoming_in_days is not None:
@@ -223,19 +230,19 @@ async def list_contacts(
     "",
     response_model=ContactResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="Create a new contact (owner only)",
+    summary="Create a new contact",
 )
 async def create_contact(
     body: CreateContactBody,
     repo: Annotated[ContactRepository, Depends(get_contact_repository)],
-    _owner: Annotated[OwnerIdentity, Depends(require_owner())],
+    identity: Annotated[Identity, Depends(require_user)],
 ) -> ContactResponse:
-    """Persist a new contact and return the saved record.
+    """Persist a new contact owned by the authenticated user.
 
     Args:
-        body: Contact creation payload.
+        body: Contact creation payload (must not include ``owner_id``).
         repo: Injected :class:`ContactRepository`.
-        _owner: Authenticated owner identity (stub).
+        identity: Authenticated caller — assigned as the contact's owner.
 
     Returns:
         The newly created :class:`ContactResponse`.
@@ -245,6 +252,7 @@ async def create_contact(
             function is called).
     """
     contact = Contact(
+        owner_id=identity.user_id,
         full_name=body.full_name,
         preferred_name=body.preferred_name,
         email=body.email,
@@ -259,27 +267,30 @@ async def create_contact(
 @router.get(
     "/{contact_id}",
     response_model=ContactResponse,
-    summary="Fetch a single contact (owner only)",
+    summary="Fetch a single contact",
 )
 async def get_contact(
     contact_id: UUID,
     repo: Annotated[ContactRepository, Depends(get_contact_repository)],
-    _owner: Annotated[OwnerIdentity, Depends(require_owner())],
+    identity: Annotated[Identity, Depends(require_user)],
 ) -> ContactResponse:
-    """Return the contact with the given ID.
+    """Return the contact with the given ID if owned by the caller.
 
     Args:
         contact_id: UUID of the contact to fetch.
         repo: Injected :class:`ContactRepository`.
-        _owner: Authenticated owner identity (stub).
+        identity: Authenticated caller.
 
     Returns:
         The :class:`ContactResponse` for the matching contact.
 
     Raises:
-        APIError: 404 if no contact with ``contact_id`` exists.
+        APIError: 404 if no contact with ``contact_id`` exists *for this
+            owner* — a wrong-owner mismatch is indistinguishable from
+            absence on purpose, so callers cannot probe for cross-tenant
+            existence.
     """
-    contact = await repo.get(contact_id)
+    contact = await repo.get(contact_id, identity.user_id)
     if contact is None:
         raise APIError(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -292,32 +303,32 @@ async def get_contact(
 @router.put(
     "/{contact_id}",
     response_model=ContactResponse,
-    summary="Update a contact (owner only)",
+    summary="Update a contact",
 )
 async def update_contact(
     contact_id: UUID,
     body: UpdateContactBody,
     repo: Annotated[ContactRepository, Depends(get_contact_repository)],
-    _owner: Annotated[OwnerIdentity, Depends(require_owner())],
+    identity: Annotated[Identity, Depends(require_user)],
 ) -> ContactResponse:
-    """Apply a partial update to an existing contact.
+    """Apply a partial update to one of the caller's contacts.
 
     Only fields explicitly included in ``body`` are changed; omitted fields
-    retain their current values.
+    retain their current values. ``owner_id`` cannot be modified.
 
     Args:
         contact_id: UUID of the contact to update.
         body: Partial update payload.
         repo: Injected :class:`ContactRepository`.
-        _owner: Authenticated owner identity (stub).
+        identity: Authenticated caller — must own the contact.
 
     Returns:
         The updated :class:`ContactResponse`.
 
     Raises:
-        APIError: 404 if no contact with ``contact_id`` exists.
+        APIError: 404 if no contact with ``contact_id`` is owned by the caller.
     """
-    contact = await repo.get(contact_id)
+    contact = await repo.get(contact_id, identity.user_id)
     if contact is None:
         raise APIError(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -335,24 +346,24 @@ async def update_contact(
 @router.delete(
     "/{contact_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    summary="Delete a contact (owner only)",
+    summary="Delete a contact",
 )
 async def delete_contact(
     contact_id: UUID,
     repo: Annotated[ContactRepository, Depends(get_contact_repository)],
-    _owner: Annotated[OwnerIdentity, Depends(require_owner())],
+    identity: Annotated[Identity, Depends(require_user)],
 ) -> None:
-    """Remove a contact permanently.
+    """Remove one of the caller's contacts permanently.
 
     Args:
         contact_id: UUID of the contact to delete.
         repo: Injected :class:`ContactRepository`.
-        _owner: Authenticated owner identity (stub).
+        identity: Authenticated caller.
 
     Raises:
-        APIError: 404 if no contact with ``contact_id`` exists.
+        APIError: 404 if no contact with ``contact_id`` is owned by the caller.
     """
-    deleted = await repo.delete(contact_id)
+    deleted = await repo.delete(contact_id, identity.user_id)
     if not deleted:
         raise APIError(
             status_code=status.HTTP_404_NOT_FOUND,

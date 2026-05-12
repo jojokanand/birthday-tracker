@@ -41,6 +41,7 @@ def _make_request(contact_id: UUID = _CONTACT_ID) -> CollectionRequest:
     """Build a minimal CollectionRequest for stubbing."""
     return CollectionRequest(
         id=_REQUEST_ID,
+        owner_id="dev-user",
         contact_id=contact_id,
         channel=Channel.email,
         destination="ada@example.com",
@@ -177,6 +178,7 @@ def test_issue_accepts_sms_channel() -> None:
     issued = IssuedRequest(
         request=CollectionRequest(
             id=uuid4(),
+            owner_id="dev-user",
             contact_id=contact_id,
             channel=Channel.sms,
             destination="+15550001234",

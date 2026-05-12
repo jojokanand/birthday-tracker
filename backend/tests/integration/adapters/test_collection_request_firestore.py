@@ -47,6 +47,9 @@ async def request_repo() -> AsyncIterator[FirestoreCollectionRequestRepository]:
             await snapshot.reference.delete()
 
 
+OWNER = "test-owner"
+
+
 def _make_request(
     contact_id: uuid.UUID | None = None,
     channel: Channel = Channel.email,
@@ -54,9 +57,11 @@ def _make_request(
     token_hash: str = "a" * 64,
     expires_at: dt.datetime | None = None,
     fulfilled_at: dt.datetime | None = None,
+    owner_id: str = OWNER,
 ) -> CollectionRequest:
     """Build a minimal :class:`CollectionRequest` for testing."""
     return CollectionRequest(
+        owner_id=owner_id,
         contact_id=contact_id or uuid.uuid4(),
         channel=channel,
         destination=destination,
@@ -69,7 +74,7 @@ def _make_request(
 @pytest.mark.integration
 async def test_get_missing(request_repo: FirestoreCollectionRequestRepository) -> None:
     """get() returns None for an unknown UUID."""
-    result = await request_repo.get(uuid.uuid4())
+    result = await request_repo.get(uuid.uuid4(), OWNER)
     assert result is None
 
 
@@ -79,7 +84,7 @@ async def test_save_and_get_roundtrip(request_repo: FirestoreCollectionRequestRe
     req = _make_request()
     await request_repo.save(req)
 
-    retrieved = await request_repo.get(req.id)
+    retrieved = await request_repo.get(req.id, OWNER)
     assert retrieved is not None
     assert retrieved.id == req.id
     assert retrieved.contact_id == req.contact_id
@@ -96,7 +101,7 @@ async def test_save_replaces_existing(request_repo: FirestoreCollectionRequestRe
     updated = req.model_copy(update={"destination": "updated@example.com"})
     await request_repo.save(updated)
 
-    retrieved = await request_repo.get(req.id)
+    retrieved = await request_repo.get(req.id, OWNER)
     assert retrieved is not None
     assert retrieved.destination == "updated@example.com"
 
@@ -130,7 +135,29 @@ async def test_fulfilled_at_round_trips(request_repo: FirestoreCollectionRequest
     req = _make_request(fulfilled_at=fulfilled)
     await request_repo.save(req)
 
-    retrieved = await request_repo.get(req.id)
+    retrieved = await request_repo.get(req.id, OWNER)
     assert retrieved is not None
     assert retrieved.fulfilled_at is not None
     assert retrieved.fulfilled_at.replace(microsecond=0) == fulfilled.replace(microsecond=0)
+
+
+@pytest.mark.integration
+async def test_get_filters_by_owner(
+    request_repo: FirestoreCollectionRequestRepository,
+) -> None:
+    """get() returns None when the caller doesn't own the request."""
+    req = _make_request(owner_id="someone-else")
+    await request_repo.save(req)
+    assert await request_repo.get(req.id, OWNER) is None
+
+
+@pytest.mark.integration
+async def test_get_by_token_hash_is_not_owner_scoped(
+    request_repo: FirestoreCollectionRequestRepository,
+) -> None:
+    """Token-hash lookup intentionally crosses tenants — the token is the credential."""
+    req = _make_request(owner_id="someone-else", token_hash="d" * 64)
+    await request_repo.save(req)
+    found = await request_repo.get_by_token_hash("d" * 64)
+    assert found is not None
+    assert found.owner_id == "someone-else"

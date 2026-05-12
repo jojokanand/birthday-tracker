@@ -43,6 +43,7 @@ _EXPIRES_AT = dt.datetime(2030, 1, 1, tzinfo=dt.UTC)
 def _make_request(channel: Channel = Channel.email) -> CollectionRequest:
     return CollectionRequest(
         id=_REQUEST_ID,
+        owner_id="dev-user",
         contact_id=_CONTACT_ID,
         channel=channel,
         destination="ada@example.com",
@@ -54,6 +55,7 @@ def _make_request(channel: Channel = Channel.email) -> CollectionRequest:
 def _make_contact(preferred_name: str | None = "Ada") -> Contact:
     return Contact(
         id=_CONTACT_ID,
+        owner_id="dev-user",
         full_name="Ada Lovelace",
         preferred_name=preferred_name,
         email="ada@example.com",

@@ -1,5 +1,8 @@
 /**
  * Unit tests for the {@link IssueRequestForm} component.
+ *
+ * Mocks the {@link useApiClient} hook so tests don't pull in the Firebase
+ * SDK.
  */
 
 import React from "react";
@@ -9,18 +12,13 @@ import { IssueRequestForm } from "@/components/issue-request-form";
 import type { ContactResponse } from "@/lib/format";
 
 // ---------------------------------------------------------------------------
-// Mock the API client
+// Mock the API client hook
 // ---------------------------------------------------------------------------
 
-vi.mock("@/lib/api", () => ({
-  apiClient: {
-    POST: vi.fn(),
-  },
+const mockPost = vi.fn();
+vi.mock("@/lib/api-client", () => ({
+  useApiClient: () => ({ POST: mockPost }),
 }));
-
-import { apiClient } from "@/lib/api";
-
-const mockPost = apiClient.POST as ReturnType<typeof vi.fn>;
 
 // ---------------------------------------------------------------------------
 // Fixtures

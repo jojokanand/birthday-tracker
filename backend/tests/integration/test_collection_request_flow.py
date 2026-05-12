@@ -83,8 +83,13 @@ def client(service: CollectionRequestService) -> TestClient:
 
 @pytest.fixture
 async def contact(contacts: InMemoryContactRepository) -> Contact:
-    """Persist and return a test contact."""
-    c = Contact(full_name="Ada Lovelace", preferred_name="Ada", email="ada@example.com")
+    """Persist and return a test contact owned by the dev identity."""
+    c = Contact(
+        owner_id="dev-user",
+        full_name="Ada Lovelace",
+        preferred_name="Ada",
+        email="ada@example.com",
+    )
     await contacts.save(c)
     return c
 
@@ -204,7 +209,7 @@ async def test_rate_limit_blocks_excess_requests(
     requests_repo: InMemoryCollectionRequestRepository,
 ) -> None:
     """After hitting the per-token cap, /form/* returns 429."""
-    c = Contact(full_name="Test", email="t@example.com")
+    c = Contact(owner_id="dev-user", full_name="Test", email="t@example.com")
     await contacts.save(c)
 
     svc = CollectionRequestService(
@@ -214,7 +219,12 @@ async def test_rate_limit_blocks_excess_requests(
         token_ttl_seconds=3600,
         public_base_url=_BASE_URL,
     )
-    issued = await svc.issue(contact_id=c.id, channel=Channel.email, destination="t@example.com")
+    issued = await svc.issue(
+        contact_id=c.id,
+        channel=Channel.email,
+        destination="t@example.com",
+        owner_id="dev-user",
+    )
     token = issued.token
 
     get_settings_dep.cache_clear()

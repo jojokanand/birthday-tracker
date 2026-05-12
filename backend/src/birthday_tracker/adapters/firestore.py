@@ -1,9 +1,14 @@
-"""Firestore-backed implementation of the contact repository.
+"""Firestore-backed implementation of the repository protocols.
 
-Contacts live in a single ``contacts`` collection keyed by the contact's UUID.
-We round-trip the Pydantic model via ``model_dump(mode="json")`` so all values
-(UUIDs, datetimes, enums, nested Address/Birthday models) become Firestore-
-compatible primitives without bespoke serialization logic.
+Contacts and collection requests live in top-level collections keyed by
+their UUID with an ``owner_id`` field used to filter per-tenant queries
+(see [infra/README.md](../../../../infra/README.md) for the required
+composite indexes). User profiles live in a ``users`` collection keyed by
+Firebase ``uid``.
+
+We round-trip Pydantic models via ``model_dump(mode="json")`` so all
+values (UUIDs, datetimes, enums, nested Address/Birthday models) become
+Firestore-compatible primitives without bespoke serialization logic.
 """
 
 from __future__ import annotations
@@ -12,7 +17,7 @@ from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from birthday_tracker.core.logging import get_logger
-from birthday_tracker.models import CollectionRequest, Contact
+from birthday_tracker.models import CollectionRequest, Contact, User
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from google.cloud.firestore import AsyncClient
@@ -21,6 +26,7 @@ logger = get_logger(__name__)
 
 CONTACTS_COLLECTION = "contacts"
 COLLECTION_REQUESTS_COLLECTION = "collection_requests"
+USERS_COLLECTION = "users"
 
 
 def build_async_client(project_id: str) -> AsyncClient:
@@ -45,6 +51,10 @@ def build_async_client(project_id: str) -> AsyncClient:
 
 class FirestoreContactRepository:
     """A :class:`~birthday_tracker.services.ContactRepository` backed by Firestore.
+
+    Tenant isolation is enforced by filtering every owner-scoped read on
+    the ``owner_id`` field. Wrong-owner lookups return ``None`` rather
+    than the document so callers cannot probe for cross-tenant existence.
 
     Attributes:
         client: The :class:`google.cloud.firestore.AsyncClient` used for I/O.
@@ -77,60 +87,82 @@ class FirestoreContactRepository:
         """
         return self.client.collection(self.collection_name).document(str(contact_id))
 
-    async def get(self, contact_id: UUID) -> Contact | None:
-        """Fetch a contact by ID.
+    async def get(self, contact_id: UUID, owner_id: str) -> Contact | None:
+        """Fetch a contact by ID if owned by ``owner_id``.
 
         Args:
             contact_id: UUID to look up.
+            owner_id: Firebase ``uid`` of the caller.
 
         Returns:
-            The :class:`Contact`, or ``None`` if no document exists.
+            The :class:`Contact`, or ``None`` if no document exists or the
+            stored owner does not match.
         """
         snapshot = await self._doc_ref(contact_id).get()
         if not snapshot.exists:
             return None
-        return Contact.model_validate(snapshot.to_dict())
+        contact = Contact.model_validate(snapshot.to_dict())
+        if contact.owner_id != owner_id:
+            return None
+        return contact
 
     async def save(self, contact: Contact) -> None:
         """Upsert ``contact`` into the collection.
 
         Args:
-            contact: Contact to persist.
+            contact: Contact to persist. The caller has already set
+                :attr:`Contact.owner_id` from the authenticated identity.
         """
         payload = contact.model_dump(mode="json")
         await self._doc_ref(contact.id).set(payload)
-        logger.info("contact_saved", contact_id=str(contact.id))
+        logger.info("contact_saved", contact_id=str(contact.id), owner_id=contact.owner_id)
 
-    async def delete(self, contact_id: UUID) -> bool:
-        """Delete a contact.
+    async def delete(self, contact_id: UUID, owner_id: str) -> bool:
+        """Delete a contact if owned by ``owner_id``.
 
         Firestore's ``delete()`` is idempotent — it succeeds even when the
-        document does not exist. We do an explicit existence check first so
-        the caller can distinguish a deletion from a no-op retry.
+        document does not exist. We do an explicit existence + owner check
+        first so the caller can distinguish a deletion from a no-op retry
+        and so we never delete another user's data.
 
         Args:
             contact_id: UUID to delete.
+            owner_id: Firebase ``uid`` of the caller.
 
         Returns:
-            ``True`` if a document was deleted, ``False`` if it did not exist.
+            ``True`` if a document was deleted, ``False`` if it did not
+            exist or belonged to a different owner.
         """
         ref = self._doc_ref(contact_id)
         snapshot = await ref.get()
         if not snapshot.exists:
             return False
+        if snapshot.to_dict().get("owner_id") != owner_id:
+            return False
         await ref.delete()
-        logger.info("contact_deleted", contact_id=str(contact_id))
+        logger.info("contact_deleted", contact_id=str(contact_id), owner_id=owner_id)
         return True
 
-    async def list_all(self) -> list[Contact]:
-        """Return every contact in the collection.
+    async def list_for_owner(self, owner_id: str) -> list[Contact]:
+        """Return every contact in the collection owned by ``owner_id``.
+
+        Requires a composite index on ``(owner_id)`` — single-field indexes
+        are auto-created by Firestore.
+
+        Args:
+            owner_id: Firebase ``uid`` of the caller.
 
         Returns:
-            All contacts in arbitrary order (Firestore does not guarantee
-            ordering without an explicit ``order_by``).
+            Matching contacts in arbitrary order (Firestore does not
+            guarantee ordering without an explicit ``order_by``).
         """
+        from google.cloud.firestore_v1.base_query import FieldFilter  # noqa: PLC0415
+
+        query = self.client.collection(self.collection_name).where(
+            filter=FieldFilter("owner_id", "==", owner_id)
+        )
         results: list[Contact] = []
-        async for snapshot in self.client.collection(self.collection_name).stream():
+        async for snapshot in query.stream():
             data = snapshot.to_dict()
             if data is not None:
                 results.append(Contact.model_validate(data))
@@ -168,22 +200,27 @@ class FirestoreCollectionRequestRepository:
         """Document reference for ``request_id`` (typed as ``Any`` due to SDK stubs)."""
         return self.client.collection(self.collection_name).document(str(request_id))
 
-    async def get(self, request_id: UUID) -> CollectionRequest | None:
-        """Fetch by UUID.
+    async def get(self, request_id: UUID, owner_id: str) -> CollectionRequest | None:
+        """Fetch a request by UUID if owned by ``owner_id``.
 
         Args:
             request_id: Request UUID.
+            owner_id: Firebase ``uid`` of the caller.
 
         Returns:
-            The :class:`CollectionRequest` or ``None`` if absent.
+            The :class:`CollectionRequest`, or ``None`` on absence / owner
+            mismatch.
         """
         snapshot = await self._doc_ref(request_id).get()
         if not snapshot.exists:
             return None
-        return CollectionRequest.model_validate(snapshot.to_dict())
+        request = CollectionRequest.model_validate(snapshot.to_dict())
+        if request.owner_id != owner_id:
+            return None
+        return request
 
     async def get_by_token_hash(self, token_hash: str) -> CollectionRequest | None:
-        """Fetch by issued-token hash.
+        """Fetch by issued-token hash. Intentionally not owner-scoped.
 
         Args:
             token_hash: Hex SHA-256 digest of the issued token.
@@ -208,7 +245,79 @@ class FirestoreCollectionRequestRepository:
         """Upsert ``request``.
 
         Args:
-            request: Request to persist.
+            request: Request to persist. The caller has already set
+                :attr:`CollectionRequest.owner_id`.
         """
         await self._doc_ref(request.id).set(request.model_dump(mode="json"))
-        logger.info("collection_request_saved", request_id=str(request.id))
+        logger.info(
+            "collection_request_saved",
+            request_id=str(request.id),
+            owner_id=request.owner_id,
+        )
+
+
+class FirestoreUserRepository:
+    """Firestore-backed :class:`~birthday_tracker.services.UserRepository`.
+
+    User profiles are stored in ``users/{uid}`` so the document ID matches
+    the Firebase Auth identifier directly.
+
+    Attributes:
+        client: Injected :class:`google.cloud.firestore.AsyncClient`.
+        collection_name: Collection name (overridable in tests).
+    """
+
+    def __init__(
+        self,
+        client: AsyncClient,
+        collection_name: str = USERS_COLLECTION,
+    ) -> None:
+        """Build the repository.
+
+        Args:
+            client: Pre-built Firestore async client.
+            collection_name: Collection name. Defaults to ``"users"``.
+        """
+        self.client = client
+        self.collection_name = collection_name
+
+    def _doc_ref(self, user_id: str) -> Any:
+        """Document reference for ``user_id``."""
+        return self.client.collection(self.collection_name).document(user_id)
+
+    async def get(self, user_id: str) -> User | None:
+        """Fetch a user profile.
+
+        Args:
+            user_id: Firebase ``uid``.
+
+        Returns:
+            The :class:`User`, or ``None`` if the profile has not been
+            created yet.
+        """
+        snapshot = await self._doc_ref(user_id).get()
+        if not snapshot.exists:
+            return None
+        return User.model_validate(snapshot.to_dict())
+
+    async def save(self, user: User) -> None:
+        """Upsert ``user``.
+
+        Args:
+            user: User profile to persist.
+        """
+        await self._doc_ref(user.id).set(user.model_dump(mode="json"))
+        logger.info("user_saved", user_id=user.id)
+
+    async def list_all(self) -> list[User]:
+        """Return every user profile.
+
+        Returns:
+            All profiles in arbitrary order.
+        """
+        results: list[User] = []
+        async for snapshot in self.client.collection(self.collection_name).stream():
+            data = snapshot.to_dict()
+            if data is not None:
+                results.append(User.model_validate(data))
+        return results
