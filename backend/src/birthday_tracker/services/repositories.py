@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Protocol
 from uuid import UUID
 
-from birthday_tracker.models import Contact
+from birthday_tracker.models import CollectionRequest, Contact
 
 
 class ContactRepository(Protocol):
@@ -64,5 +64,44 @@ class ContactRepository(Protocol):
 
         Returns:
             All contacts in arbitrary order.
+        """
+        ...  # pragma: no cover
+
+
+class CollectionRequestRepository(Protocol):
+    """Persistence interface for :class:`~birthday_tracker.models.CollectionRequest`.
+
+    Lookups happen primarily by token-hash (the form endpoint receives a raw
+    token, hashes it, and looks up the request) and by ID (for the owner UI).
+    """
+
+    async def get(self, request_id: UUID) -> CollectionRequest | None:
+        """Fetch a request by its UUID.
+
+        Args:
+            request_id: Request UUID.
+
+        Returns:
+            The :class:`CollectionRequest`, or ``None`` if absent.
+        """
+        ...  # pragma: no cover
+
+    async def get_by_token_hash(self, token_hash: str) -> CollectionRequest | None:
+        """Fetch a request by the SHA-256 hex digest of its issued token.
+
+        Args:
+            token_hash: Hex digest as produced by
+                :func:`birthday_tracker.core.tokens.hash_token`.
+
+        Returns:
+            The :class:`CollectionRequest`, or ``None`` if no match.
+        """
+        ...  # pragma: no cover
+
+    async def save(self, request: CollectionRequest) -> None:
+        """Insert or replace ``request`` keyed by :attr:`CollectionRequest.id`.
+
+        Args:
+            request: The request to persist.
         """
         ...  # pragma: no cover

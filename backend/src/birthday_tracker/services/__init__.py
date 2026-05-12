@@ -5,9 +5,13 @@ from birthday_tracker.services.notifiers import (
     NotificationError,
     SmsNotifier,
 )
-from birthday_tracker.services.repositories import ContactRepository
+from birthday_tracker.services.repositories import (
+    CollectionRequestRepository,
+    ContactRepository,
+)
 
 __all__ = [
+    "CollectionRequestRepository",
     "ContactRepository",
     "EmailNotifier",
     "NotificationError",
