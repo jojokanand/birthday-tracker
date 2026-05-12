@@ -20,6 +20,9 @@ dependencies = [
     "twilio>=9.3,<10.0",
     "httpx>=0.28,<1.0",
     "python-dotenv>=1.0,<2.0",
+    "structlog>=24.4,<26.0",
+    "email-validator>=2.2,<3.0",       # for pydantic.EmailStr
+    "phonenumbers>=8.13,<9.0",         # E.164 validation
 ]
 
 [project.optional-dependencies]
@@ -54,6 +57,20 @@ src = ["src", "tests"]
 # E,F=pycodestyle/pyflakes, I=isort, B=bugbear, UP=pyupgrade, D=pydocstyle (Google style)
 select = ["E", "F", "I", "B", "UP", "D"]
 ignore = ["D203", "D213"]  # conflicting docstring rules; we use D211 + D212 by default
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI dependency-injection markers belong in default arguments — that's the framework's pattern.
+extend-immutable-calls = [
+    "fastapi.Depends",
+    "fastapi.Query",
+    "fastapi.Path",
+    "fastapi.Body",
+    "fastapi.Header",
+    "fastapi.Cookie",
+    "fastapi.Form",
+    "fastapi.File",
+    "fastapi.Security",
+]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
