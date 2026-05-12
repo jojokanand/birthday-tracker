@@ -27,14 +27,18 @@ import type { ContactResponse } from "@/lib/format";
 /**
  * Collection request page.
  *
- * Loads the caller's contact list client-side, then renders the
- * interactive {@link IssueRequestForm}.
+ * The outer component wraps everything in a `<Suspense>` because Next.js
+ * 16 requires `useSearchParams()` consumers to be inside one — otherwise
+ * the static-prerender step fails. The actual content runs inside
+ * `<AuthGuard>` so anonymous visitors get bounced to `/sign-in`.
  */
 export default function NewCollectionRequestPage() {
   return (
-    <AuthGuard>
-      <NewCollectionRequestContent />
-    </AuthGuard>
+    <React.Suspense fallback={null}>
+      <AuthGuard>
+        <NewCollectionRequestContent />
+      </AuthGuard>
+    </React.Suspense>
   );
 }
 
