@@ -42,6 +42,21 @@ jobs:
 
       - uses: google-github-actions/setup-gcloud@v2
 
+      # Trim whitespace from URL-shaped variables. Values pasted from the
+      # gcloud CLI / GCP console sometimes carry a leading space; without
+      # trimming, the docker build arg below splits into two positional
+      # args and fails with "docker buildx build requires 1 argument".
+      - name: Normalize URL variables
+        id: urls
+        env:
+          RAW_BACKEND_URL: ${{ vars.BACKEND_URL }}
+          RAW_FRONTEND_URL: ${{ vars.FRONTEND_URL }}
+        run: |
+          backend=$(printf '%s' "$RAW_BACKEND_URL" | xargs)
+          frontend=$(printf '%s' "$RAW_FRONTEND_URL" | xargs)
+          echo "backend=${backend:-http://localhost:8000}" >> "$GITHUB_OUTPUT"
+          echo "frontend=${frontend:-http://localhost:3000}" >> "$GITHUB_OUTPUT"
+
       - name: Configure Docker for Artifact Registry
         run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
 
@@ -68,7 +83,7 @@ jobs:
         run: |
           docker build \
             -f infra/Dockerfile.frontend \
-            --build-arg NEXT_PUBLIC_API_URL=${{ vars.BACKEND_URL || 'http://localhost:8000' }} \
+            --build-arg "NEXT_PUBLIC_API_URL=${{ steps.urls.outputs.backend }}" \
             -t ${{ env.REGISTRY }}/frontend:${{ github.sha }} \
             -t ${{ env.REGISTRY }}/frontend:latest \
             .
@@ -94,7 +109,7 @@ jobs:
           env_vars: |
             APP_ENV=production
             GCP_PROJECT_ID=${{ vars.GCP_PROJECT_ID }}
-            PUBLIC_BASE_URL=${{ vars.FRONTEND_URL }}
+            PUBLIC_BASE_URL=${{ steps.urls.outputs.frontend }}
           secrets: |
             TWILIO_AUTH_TOKEN=TWILIO_AUTH_TOKEN:latest
             GMAIL_OAUTH_TOKEN=GMAIL_OAUTH_TOKEN:latest
