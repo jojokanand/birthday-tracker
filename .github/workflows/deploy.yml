@@ -81,12 +81,16 @@ jobs:
       # -----------------------------------------------------------------------
       # Deploy backend to Cloud Run
       # -----------------------------------------------------------------------
+      # Run as the deploy SA so the revision has Secret Manager + Firestore
+      # access (granted in infra/README step 5). Without this, Cloud Run uses
+      # the default Compute Engine SA, which is denied access to our secrets.
       - name: Deploy backend
         uses: google-github-actions/deploy-cloudrun@v2
         with:
           service: ${{ env.BACKEND_SERVICE }}
           region: ${{ env.REGION }}
           image: ${{ env.REGISTRY }}/backend:${{ github.sha }}
+          flags: --service-account=${{ vars.GCP_SERVICE_ACCOUNT }}
           env_vars: |
             APP_ENV=production
             GCP_PROJECT_ID=${{ vars.GCP_PROJECT_ID }}
@@ -105,3 +109,4 @@ jobs:
           service: ${{ env.FRONTEND_SERVICE }}
           region: ${{ env.REGION }}
           image: ${{ env.REGISTRY }}/frontend:${{ github.sha }}
+          flags: --service-account=${{ vars.GCP_SERVICE_ACCOUNT }}
