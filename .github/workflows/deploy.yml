@@ -1,0 +1,102 @@
+name: deploy
+
+on:
+  push:
+    branches: [main]
+
+# These vars are set in the GitHub repo → Settings → Variables (Actions).
+# Secrets are set in Settings → Secrets → Actions.
+env:
+  PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+  REGION: ${{ vars.GCP_REGION }}
+  # Full Artifact Registry host, e.g. us-central1-docker.pkg.dev/my-project/birthday-tracker
+  REGISTRY: ${{ vars.GCP_ARTIFACT_REGISTRY }}
+  BACKEND_SERVICE: birthday-tracker-backend
+  FRONTEND_SERVICE: birthday-tracker-frontend
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    # id-token:write is required for Workload Identity Federation.
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # -----------------------------------------------------------------------
+      # Authenticate to GCP via Workload Identity Federation (no JSON key).
+      # -----------------------------------------------------------------------
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
+
+      # -----------------------------------------------------------------------
+      # Backend — build & push
+      # -----------------------------------------------------------------------
+      - name: Build backend image
+        run: |
+          docker build \
+            -f infra/Dockerfile.backend \
+            -t ${{ env.REGISTRY }}/backend:${{ github.sha }} \
+            -t ${{ env.REGISTRY }}/backend:latest \
+            .
+
+      - name: Push backend image
+        run: |
+          docker push ${{ env.REGISTRY }}/backend:${{ github.sha }}
+          docker push ${{ env.REGISTRY }}/backend:latest
+
+      # -----------------------------------------------------------------------
+      # Frontend — build & push (API URL baked in at build time)
+      # -----------------------------------------------------------------------
+      - name: Build frontend image
+        run: |
+          docker build \
+            -f infra/Dockerfile.frontend \
+            --build-arg NEXT_PUBLIC_API_URL=${{ vars.BACKEND_URL }} \
+            -t ${{ env.REGISTRY }}/frontend:${{ github.sha }} \
+            -t ${{ env.REGISTRY }}/frontend:latest \
+            .
+
+      - name: Push frontend image
+        run: |
+          docker push ${{ env.REGISTRY }}/frontend:${{ github.sha }}
+          docker push ${{ env.REGISTRY }}/frontend:latest
+
+      # -----------------------------------------------------------------------
+      # Deploy backend to Cloud Run
+      # -----------------------------------------------------------------------
+      - name: Deploy backend
+        uses: google-github-actions/deploy-cloudrun@v2
+        with:
+          service: ${{ env.BACKEND_SERVICE }}
+          region: ${{ env.REGION }}
+          image: ${{ env.REGISTRY }}/backend:${{ github.sha }}
+          env_vars: |
+            APP_ENV=production
+            GCP_PROJECT_ID=${{ vars.GCP_PROJECT_ID }}
+            PUBLIC_BASE_URL=${{ vars.FRONTEND_URL }}
+          secrets: |
+            TWILIO_AUTH_TOKEN=TWILIO_AUTH_TOKEN:latest
+            GMAIL_OAUTH_TOKEN=GMAIL_OAUTH_TOKEN:latest
+            FORM_TOKEN_SECRET=FORM_TOKEN_SECRET:latest
+
+      # -----------------------------------------------------------------------
+      # Deploy frontend to Cloud Run
+      # -----------------------------------------------------------------------
+      - name: Deploy frontend
+        uses: google-github-actions/deploy-cloudrun@v2
+        with:
+          service: ${{ env.FRONTEND_SERVICE }}
+          region: ${{ env.REGION }}
+          image: ${{ env.REGISTRY }}/frontend:${{ github.sha }}
