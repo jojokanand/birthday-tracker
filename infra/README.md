@@ -176,25 +176,7 @@ echo -n "new-value" | \
 
 ---
 
-## 8. Set the Cloud Run service identity
-
-Both Cloud Run services must run as the deploy service account so they can
-access Firestore and Secret Manager at runtime. The `deploy-cloudrun` action
-in the workflow sets this automatically; to configure it manually:
-
-```bash
-gcloud run services update birthday-tracker-backend \
-  --service-account "${SA_EMAIL}" \
-  --region "$REGION" --project "$PROJECT_ID"
-
-gcloud run services update birthday-tracker-frontend \
-  --service-account "${SA_EMAIL}" \
-  --region "$REGION" --project "$PROJECT_ID"
-```
-
----
-
-## 9. Set GitHub Actions variables
+## 8. Set GitHub Actions variables
 
 In the GitHub repo → **Settings → Secrets and variables → Actions**:
 
@@ -207,11 +189,54 @@ In the GitHub repo → **Settings → Secrets and variables → Actions**:
 | `GCP_ARTIFACT_REGISTRY` | `us-central1-docker.pkg.dev/my-birthday-tracker/birthday-tracker` |
 | `GCP_WIF_PROVIDER` | `projects/123456789/locations/global/workloadIdentityPools/github-pool/providers/github-provider` |
 | `GCP_SERVICE_ACCOUNT` | `birthday-tracker-deploy@my-birthday-tracker.iam.gserviceaccount.com` |
-| `BACKEND_URL` | `https://birthday-tracker-backend-xxxx-uc.a.run.app` |
-| `FRONTEND_URL` | `https://birthday-tracker-frontend-xxxx-uc.a.run.app` |
+| `BACKEND_URL` | _(filled in after step 9)_ |
+| `FRONTEND_URL` | _(filled in after step 9)_ |
 
-> `BACKEND_URL` and `FRONTEND_URL` are known after the first successful deploy.
-> Use placeholder values initially, then update once the services are live.
+Leave `BACKEND_URL` / `FRONTEND_URL` blank for now — the Cloud Run services
+that own those URLs don't exist yet. You'll back-fill them in step 9.
+
+---
+
+## 9. Trigger the first deploy
+
+With the variables above set, the [deploy workflow](../.github/workflows/deploy.yml)
+will run on the next push to `main`, build and push the backend + frontend
+images, and create the two Cloud Run services. The `deploy-cloudrun` action
+in the workflow sets each service's runtime identity to `${SA_EMAIL}`
+automatically — no manual `gcloud run services update --service-account` step
+is needed.
+
+```bash
+# Easiest trigger: an empty commit pushed to main.
+git commit --allow-empty -m "chore: trigger first deploy"
+git push origin main
+```
+
+Watch the run at **GitHub → Actions → deploy**. Once it succeeds, retrieve
+the live URLs and back-fill the two `*_URL` variables from step 8:
+
+```bash
+gcloud run services describe birthday-tracker-backend \
+  --region "$REGION" --project "$PROJECT_ID" \
+  --format='value(status.url)'
+
+gcloud run services describe birthday-tracker-frontend \
+  --region "$REGION" --project "$PROJECT_ID" \
+  --format='value(status.url)'
+```
+
+Paste each URL into **Settings → Variables → Actions** as `BACKEND_URL` and
+`FRONTEND_URL`, then push another commit to `main` so the next deploy picks
+them up:
+
+- `BACKEND_URL` is baked into the frontend image as `NEXT_PUBLIC_API_URL`
+  (build arg in [.github/workflows/deploy.yml](../.github/workflows/deploy.yml)),
+  so the browser knows where to reach the API.
+- `FRONTEND_URL` is set on the backend as the `PUBLIC_BASE_URL` env var, used
+  to construct the self-serve form links sent in SMS/email.
+
+The backend's `DIGEST_OIDC_AUDIENCE` is a separate setting configured in
+step 11.
 
 ---
 
@@ -314,4 +339,5 @@ curl "${BACKEND_URL}/internal/digest/upcoming?days=14" \
 | View frontend logs | `gcloud run services logs read birthday-tracker-frontend --region $REGION` |
 | Force redeploy (same image) | Push any commit to `main` |
 | Rotate a secret | Add a new secret version (step 7) |
+| Rotate the runtime service account | `gcloud run services update birthday-tracker-{backend,frontend} --service-account "${SA_EMAIL}" --region "$REGION" --project "$PROJECT_ID"` (run once per service, only after the first deploy) |
 | Scale to zero (cost saving) | Cloud Run does this automatically when idle |
