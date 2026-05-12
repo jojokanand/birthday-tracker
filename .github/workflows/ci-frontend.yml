@@ -17,4 +17,4 @@ jobs:
   noop:
     runs-on: ubuntu-latest
     steps:
-      - run: echo "Frontend CI is a no-op until issue #6 scaffolds the Next.js app."
+      - run: echo 'Frontend CI is a no-op until issue \#6 scaffolds the Next.js app.'
