@@ -122,6 +122,11 @@ uv run sphinx-build -b html docs docs/_build/html
 |--------|------|------|-------------|
 | `GET` | `/health` | none | Liveness probe |
 | `GET` | `/ready` | none | Readiness probe (Firestore ping) |
+| `GET` | `/contacts` | owner | List all contacts (add `?upcoming_in_days=N` to filter by birthday) |
+| `POST` | `/contacts` | owner | Create a new contact |
+| `GET` | `/contacts/{id}` | owner | Fetch a single contact |
+| `PUT` | `/contacts/{id}` | owner | Update a contact's fields |
+| `DELETE` | `/contacts/{id}` | owner | Delete a contact |
 | `POST` | `/collection-requests` | owner | Issue a signed form token for a contact |
 | `GET` | `/form/{token}` | none | Fetch form metadata for self-serve entry |
 | `POST` | `/form/{token}` | none | Submit form data; marks request fulfilled |

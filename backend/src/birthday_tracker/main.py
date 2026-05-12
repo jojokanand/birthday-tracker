@@ -10,7 +10,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 
 from birthday_tracker import __version__
-from birthday_tracker.api import collection_requests, errors, form, health, ready
+from birthday_tracker.api import collection_requests, contacts, errors, form, health, ready
 from birthday_tracker.core.config import Settings, get_settings
 from birthday_tracker.core.logging import configure_logging, get_logger
 from birthday_tracker.core.rate_limit import RateLimiter
@@ -54,6 +54,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     errors.install_error_handlers(app)
     app.include_router(health.router)
     app.include_router(ready.router)
+    app.include_router(contacts.router)
     app.include_router(collection_requests.router)
     app.include_router(form.router)
 

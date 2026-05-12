@@ -1,0 +1,1023 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Birthday Tracker API",
+    "description": "Backend for the Birthday Tracker. Manages contacts, collection requests, and outbound SMS/email notifications.",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "summary": "Liveness probe",
+        "description": "Return a static liveness payload.\n\nReturns:\n    A :class:`HealthResponse` indicating the service is up. Does not check\n    downstream dependencies on purpose \u2014 readiness checks belong in a\n    separate endpoint that we will add when wiring Firestore.",
+        "operationId": "get_health_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ready": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "summary": "Readiness probe (pings Firestore)",
+        "description": "Return readiness state, including a live Firestore ping.\n\nArgs:\n    response: Injected so we can flip the status code to 503 when the\n        downstream check fails without raising.\n    settings: Process settings (project ID, optional emulator host).\n\nReturns:\n    :class:`ReadinessResponse` describing the outcome. The HTTP status is\n    200 when ready, 503 otherwise.",
+        "operationId": "get_ready_ready_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadinessResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Firestore unreachable"
+          }
+        }
+      }
+    },
+    "/contacts": {
+      "get": {
+        "tags": [
+          "contacts"
+        ],
+        "summary": "List all contacts (owner only)",
+        "description": "Return all contacts, optionally filtered to upcoming birthdays.\n\nArgs:\n    repo: Injected :class:`ContactRepository`.\n    _owner: Authenticated owner identity (stub).\n    upcoming_in_days: Optional filter: only contacts with a birthday\n        within the next ``upcoming_in_days`` calendar days are returned.\n        Contacts without a birthday are omitted when this filter is active.\n\nReturns:\n    List of :class:`ContactResponse` objects, ordered by\n    ``days_until_birthday`` when ``upcoming_in_days`` is set, otherwise\n    by ascending ``full_name``.",
+        "operationId": "list_contacts_contacts_get",
+        "parameters": [
+          {
+            "name": "upcoming_in_days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "maximum": 365,
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "When set, return only contacts whose birthday falls within the next *N* days (inclusive). Contacts without a birthday are excluded.",
+              "title": "Upcoming In Days"
+            },
+            "description": "When set, return only contacts whose birthday falls within the next *N* days (inclusive). Contacts without a birthday are excluded."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ContactResponse"
+                  },
+                  "title": "Response List Contacts Contacts Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "contacts"
+        ],
+        "summary": "Create a new contact (owner only)",
+        "description": "Persist a new contact and return the saved record.\n\nArgs:\n    body: Contact creation payload.\n    repo: Injected :class:`ContactRepository`.\n    _owner: Authenticated owner identity (stub).\n\nReturns:\n    The newly created :class:`ContactResponse`.\n\nRaises:\n    APIError: 422 if the body is invalid (handled by FastAPI before this\n        function is called).",
+        "operationId": "create_contact_contacts_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateContactBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContactResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/contacts/{contact_id}": {
+      "get": {
+        "tags": [
+          "contacts"
+        ],
+        "summary": "Fetch a single contact (owner only)",
+        "description": "Return the contact with the given ID.\n\nArgs:\n    contact_id: UUID of the contact to fetch.\n    repo: Injected :class:`ContactRepository`.\n    _owner: Authenticated owner identity (stub).\n\nReturns:\n    The :class:`ContactResponse` for the matching contact.\n\nRaises:\n    APIError: 404 if no contact with ``contact_id`` exists.",
+        "operationId": "get_contact_contacts__contact_id__get",
+        "parameters": [
+          {
+            "name": "contact_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Contact Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContactResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "contacts"
+        ],
+        "summary": "Update a contact (owner only)",
+        "description": "Apply a partial update to an existing contact.\n\nOnly fields explicitly included in ``body`` are changed; omitted fields\nretain their current values.\n\nArgs:\n    contact_id: UUID of the contact to update.\n    body: Partial update payload.\n    repo: Injected :class:`ContactRepository`.\n    _owner: Authenticated owner identity (stub).\n\nReturns:\n    The updated :class:`ContactResponse`.\n\nRaises:\n    APIError: 404 if no contact with ``contact_id`` exists.",
+        "operationId": "update_contact_contacts__contact_id__put",
+        "parameters": [
+          {
+            "name": "contact_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Contact Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateContactBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContactResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "contacts"
+        ],
+        "summary": "Delete a contact (owner only)",
+        "description": "Remove a contact permanently.\n\nArgs:\n    contact_id: UUID of the contact to delete.\n    repo: Injected :class:`ContactRepository`.\n    _owner: Authenticated owner identity (stub).\n\nRaises:\n    APIError: 404 if no contact with ``contact_id`` exists.",
+        "operationId": "delete_contact_contacts__contact_id__delete",
+        "parameters": [
+          {
+            "name": "contact_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Contact Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/collection-requests": {
+      "post": {
+        "tags": [
+          "collection-requests"
+        ],
+        "summary": "Issue a new collection request (owner only)",
+        "description": "Mint a token and persist a pending collection request.\n\nArgs:\n    body: Request payload with ``contact_id``, ``channel``, ``destination``.\n    service: Injected :class:`CollectionRequestService`.\n    _owner: Authenticated owner identity (stub \u2014 real auth in issue #7).\n\nReturns:\n    :class:`IssuedRequestResponse` carrying the public form URL.\n\nRaises:\n    APIError: 404 if the referenced contact does not exist.",
+        "operationId": "issue_collection_request_collection_requests_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IssueRequestBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IssuedRequestResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/form/{token}": {
+      "get": {
+        "tags": [
+          "form"
+        ],
+        "summary": "Fetch metadata for a self-serve form",
+        "description": "Return enough info for the frontend to render the form.\n\nArgs:\n    token: Raw signed token from the URL path.\n    service: Injected :class:`CollectionRequestService`.\n    limiter: Injected per-token rate limiter.\n\nReturns:\n    :class:`FormMetadataResponse` describing the form for this token.\n\nRaises:\n    APIError: 404 if the token is invalid, 410 if expired/used, 429 if\n        rate-limited.",
+        "operationId": "get_form_metadata_form__token__get",
+        "parameters": [
+          {
+            "name": "token",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FormMetadataResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Token unknown or malformed"
+          },
+          "410": {
+            "description": "Token expired or request already fulfilled"
+          },
+          "429": {
+            "description": "Rate limit exceeded for this token"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "form"
+        ],
+        "summary": "Submit the self-serve form",
+        "description": "Persist the contact's submission and mark the request fulfilled.\n\nArgs:\n    token: Raw signed token from the URL path.\n    body: Validated submission payload.\n    service: Injected :class:`CollectionRequestService`.\n    limiter: Injected per-token rate limiter.\n\nRaises:\n    APIError: 404 if token/contact missing, 410 if expired/used, 429\n        if rate-limited.",
+        "operationId": "submit_form_form__token__post",
+        "parameters": [
+          {
+            "name": "token",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FormSubmissionBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "Token unknown or contact missing"
+          },
+          "410": {
+            "description": "Token expired or request already fulfilled"
+          },
+          "429": {
+            "description": "Rate limit exceeded for this token"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Address": {
+        "properties": {
+          "street1": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Street1"
+          },
+          "street2": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Street2"
+          },
+          "city": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "City"
+          },
+          "region": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 100
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Region"
+          },
+          "postal_code": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 20
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Postal Code"
+          },
+          "country": {
+            "type": "string",
+            "maxLength": 2,
+            "minLength": 2,
+            "title": "Country",
+            "default": "US"
+          }
+        },
+        "type": "object",
+        "required": [
+          "street1",
+          "city"
+        ],
+        "title": "Address",
+        "description": "A postal address.\n\nValidation is intentionally permissive \u2014 we accept addresses from any\ncountry and do not normalize or geocode. The only hard requirements are a\nnon-empty first street line and a city; everything else is optional because\ncontacts will fill this in via a self-serve form and we do not want to\nblock them on, for example, an unfamiliar postal-code format.\n\nAttributes:\n    street1: First line of the street address (e.g. ``\"123 Main St\"``).\n    street2: Optional second line (apartment, suite, etc.).\n    city: City or locality name.\n    region: State, province, or region. Optional because some countries\n        (e.g. Singapore) do not use one.\n    postal_code: ZIP / postcode. Optional for the same reason.\n    country: ISO 3166-1 alpha-2 country code, uppercased. Defaults to\n        ``\"US\"`` since this is a personal-use app."
+      },
+      "Birthday": {
+        "properties": {
+          "month": {
+            "type": "integer",
+            "maximum": 12.0,
+            "minimum": 1.0,
+            "title": "Month"
+          },
+          "day": {
+            "type": "integer",
+            "maximum": 31.0,
+            "minimum": 1.0,
+            "title": "Day"
+          },
+          "year": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1900.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Year"
+          }
+        },
+        "type": "object",
+        "required": [
+          "month",
+          "day"
+        ],
+        "title": "Birthday",
+        "description": "Month, day, and optional year of a person's birthday.\n\nAttributes:\n    month: Calendar month, 1 (January) through 12 (December).\n    day: Day of the month, 1 through 31. Validated against ``month``\n        (and ``year`` when present) so impossible dates are rejected.\n    year: Four-digit Gregorian year, or ``None`` if unknown / withheld.\n        Constrained to a sensible human range (1900\u2013current year)."
+      },
+      "Channel": {
+        "type": "string",
+        "enum": [
+          "sms",
+          "email"
+        ],
+        "title": "Channel",
+        "description": "Channel used to deliver a collection request to a contact."
+      },
+      "ContactResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "full_name": {
+            "type": "string",
+            "title": "Full Name"
+          },
+          "preferred_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preferred Name"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone"
+          },
+          "address": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Address"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "birthday": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Birthday"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At",
+            "description": "ISO-8601 UTC creation timestamp."
+          },
+          "updated_at": {
+            "type": "string",
+            "title": "Updated At",
+            "description": "ISO-8601 UTC last-updated timestamp."
+          },
+          "days_until_birthday": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Days Until Birthday",
+            "description": "Days until the next occurrence of the contact's birthday, or null."
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "full_name",
+          "preferred_name",
+          "email",
+          "phone",
+          "address",
+          "birthday",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "ContactResponse",
+        "description": "Wire representation of a :class:`~birthday_tracker.models.Contact`.\n\nMatches the :class:`Contact` fields but uses ``str`` for UUID/datetime\nso JSON serialization is explicit and stable across Python versions."
+      },
+      "CreateContactBody": {
+        "properties": {
+          "full_name": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Full Name",
+            "description": "Full name."
+          },
+          "preferred_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 100
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preferred Name",
+            "description": "Nickname used in greetings."
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "email"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email",
+            "description": "Email address."
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone",
+            "description": "Phone number (E.164)."
+          },
+          "address": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Address"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Postal address."
+          },
+          "birthday": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Birthday"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Birthday."
+          }
+        },
+        "type": "object",
+        "required": [
+          "full_name"
+        ],
+        "title": "CreateContactBody",
+        "description": "Request body for ``POST /contacts``."
+      },
+      "FormMetadataResponse": {
+        "properties": {
+          "greeting_name": {
+            "type": "string",
+            "title": "Greeting Name"
+          },
+          "channel": {
+            "type": "string",
+            "title": "Channel"
+          },
+          "expires_at": {
+            "type": "string",
+            "title": "Expires At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "greeting_name",
+          "channel",
+          "expires_at"
+        ],
+        "title": "FormMetadataResponse",
+        "description": "Returned by ``GET /form/{token}``.\n\nAttributes:\n    greeting_name: First-name-style label safe to show in the form\n        header. We never expose contact secrets via the public form.\n    channel: Channel used to deliver the link.\n    expires_at: ISO-8601 expiry timestamp."
+      },
+      "FormSubmissionBody": {
+        "properties": {
+          "full_name": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Full Name"
+          },
+          "preferred_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 100
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preferred Name"
+          },
+          "address": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "birthday": {
+            "$ref": "#/components/schemas/Birthday"
+          }
+        },
+        "type": "object",
+        "required": [
+          "full_name",
+          "address",
+          "birthday"
+        ],
+        "title": "FormSubmissionBody",
+        "description": "Validated payload accepted by ``POST /form/{token}``."
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "HealthResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "version": {
+            "type": "string",
+            "title": "Version"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "version"
+        ],
+        "title": "HealthResponse",
+        "description": "Payload returned by :func:`get_health`.\n\nAttributes:\n    status: Always ``\"ok\"`` when the process can serve a response.\n    version: Package version string for the running build."
+      },
+      "IssueRequestBody": {
+        "properties": {
+          "contact_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Contact Id",
+            "description": "ID of the contact this request is for."
+          },
+          "channel": {
+            "$ref": "#/components/schemas/Channel",
+            "description": "Delivery channel for the form link."
+          },
+          "destination": {
+            "type": "string",
+            "maxLength": 320,
+            "minLength": 1,
+            "title": "Destination",
+            "description": "Phone number (E.164) or email address the link will be sent to."
+          }
+        },
+        "type": "object",
+        "required": [
+          "contact_id",
+          "channel",
+          "destination"
+        ],
+        "title": "IssueRequestBody",
+        "description": "Request body for ``POST /collection-requests``."
+      },
+      "IssuedRequestResponse": {
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Request Id",
+            "description": "ID of the persisted CollectionRequest."
+          },
+          "contact_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Contact Id"
+          },
+          "channel": {
+            "$ref": "#/components/schemas/Channel"
+          },
+          "destination": {
+            "type": "string",
+            "title": "Destination"
+          },
+          "expires_at": {
+            "type": "string",
+            "title": "Expires At",
+            "description": "ISO-8601 expiry timestamp."
+          },
+          "form_url": {
+            "type": "string",
+            "title": "Form Url",
+            "description": "Public URL to send to the contact."
+          }
+        },
+        "type": "object",
+        "required": [
+          "request_id",
+          "contact_id",
+          "channel",
+          "destination",
+          "expires_at",
+          "form_url"
+        ],
+        "title": "IssuedRequestResponse",
+        "description": "Response body returned by ``POST /collection-requests``."
+      },
+      "ReadinessResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "firestore": {
+            "type": "string",
+            "title": "Firestore"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "firestore"
+        ],
+        "title": "ReadinessResponse",
+        "description": "Payload returned by :func:`get_ready`.\n\nAttributes:\n    status: ``\"ready\"`` on success, ``\"not_ready\"`` on failure.\n    firestore: ``\"ok\"`` or a short failure description."
+      },
+      "UpdateContactBody": {
+        "properties": {
+          "full_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Full Name"
+          },
+          "preferred_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preferred Name"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "email"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone"
+          },
+          "address": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Address"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "birthday": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Birthday"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "title": "UpdateContactBody",
+        "description": "Request body for ``PUT /contacts/{contact_id}``.\n\nAll fields are optional; only supplied fields are applied."
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    }
+  }
+}
