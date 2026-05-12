@@ -46,6 +46,9 @@ Thumbs.db
 .vscode/
 !.vscode/settings.json.example
 
+# Claude Code session state (per-machine; never committed)
+.claude/
+
 # Build / deploy
 *.log
 *.pid
