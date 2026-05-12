@@ -95,6 +95,36 @@ Domain models
    :undoc-members:
    :show-inheritance:
 
+Token primitives
+----------------
+
+.. autofunction:: birthday_tracker.core.tokens.sign_token
+
+.. autofunction:: birthday_tracker.core.tokens.verify_token
+
+.. autofunction:: birthday_tracker.core.tokens.hash_token
+
+.. autoclass:: birthday_tracker.core.tokens.TokenPayload
+   :members:
+   :show-inheritance:
+   :no-index:
+
+.. autoexception:: birthday_tracker.core.tokens.TokenInvalid
+   :show-inheritance:
+
+.. autoexception:: birthday_tracker.core.tokens.TokenExpired
+   :show-inheritance:
+
+Rate limiter
+------------
+
+.. autoclass:: birthday_tracker.core.rate_limit.RateLimiter
+   :members:
+   :show-inheritance:
+
+.. autoexception:: birthday_tracker.core.rate_limit.RateLimitExceeded
+   :show-inheritance:
+
 Services layer (Protocols)
 --------------------------
 
@@ -102,6 +132,11 @@ Services layer (Protocols)
    :members:
 
 .. autoclass:: birthday_tracker.services.repositories.ContactRepository
+   :members:
+   :show-inheritance:
+   :no-index:
+
+.. autoclass:: birthday_tracker.services.repositories.CollectionRequestRepository
    :members:
    :show-inheritance:
    :no-index:
@@ -120,18 +155,77 @@ Services layer (Protocols)
    :show-inheritance:
    :no-index:
 
+Collection request service
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: birthday_tracker.services.collection_requests.CollectionRequestService
+   :members:
+   :show-inheritance:
+
+.. autoclass:: birthday_tracker.services.collection_requests.IssuedRequest
+   :members:
+   :show-inheritance:
+   :no-index:
+
+.. autoclass:: birthday_tracker.services.collection_requests.FormSubmission
+   :members:
+   :show-inheritance:
+   :no-index:
+
+.. autoexception:: birthday_tracker.services.collection_requests.ContactNotFound
+   :show-inheritance:
+
+.. autoexception:: birthday_tracker.services.collection_requests.RequestNotPending
+   :show-inheritance:
+
+Collection-requests endpoint
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: birthday_tracker.api.collection_requests.issue_collection_request
+
+.. autopydantic_model:: birthday_tracker.api.collection_requests.IssueRequestBody
+   :model-show-json: False
+   :model-show-config-summary: False
+
+.. autopydantic_model:: birthday_tracker.api.collection_requests.IssuedRequestResponse
+   :model-show-json: False
+   :model-show-config-summary: False
+
+Form endpoints
+~~~~~~~~~~~~~~
+
+.. autofunction:: birthday_tracker.api.form.get_form_metadata
+
+.. autofunction:: birthday_tracker.api.form.submit_form
+
+.. autopydantic_model:: birthday_tracker.api.form.FormMetadataResponse
+   :model-show-json: False
+   :model-show-config-summary: False
+
+.. autopydantic_model:: birthday_tracker.api.form.FormSubmissionBody
+   :model-show-json: False
+   :model-show-config-summary: False
+
 Adapters
 --------
 
 .. automodule:: birthday_tracker.adapters
    :members:
-   :exclude-members: InMemoryContactRepository, FirestoreContactRepository, TwilioNotifier, GmailNotifier
+   :exclude-members: InMemoryContactRepository, InMemoryCollectionRequestRepository, FirestoreContactRepository, FirestoreCollectionRequestRepository, TwilioNotifier, GmailNotifier
 
 .. autoclass:: birthday_tracker.adapters.in_memory.InMemoryContactRepository
    :members:
    :show-inheritance:
 
+.. autoclass:: birthday_tracker.adapters.in_memory.InMemoryCollectionRequestRepository
+   :members:
+   :show-inheritance:
+
 .. autoclass:: birthday_tracker.adapters.firestore.FirestoreContactRepository
+   :members:
+   :show-inheritance:
+
+.. autoclass:: birthday_tracker.adapters.firestore.FirestoreCollectionRequestRepository
    :members:
    :show-inheritance:
 

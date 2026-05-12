@@ -75,6 +75,24 @@ class Settings(BaseSettings):
         description="Email address sent on behalf of (must match the OAuth grant).",
     )
 
+    # --- Self-serve form ---
+    form_token_secret: str = Field(
+        default="",
+        description="HMAC key used to sign form tokens. Must be set in non-dev envs.",
+    )
+    form_token_ttl_seconds: int = Field(
+        default=7 * 24 * 60 * 60,
+        description="Form-token lifetime in seconds (default: 7 days).",
+    )
+    public_base_url: str = Field(
+        default="http://localhost:3000",
+        description="Public base URL of the dashboard, used to build form links.",
+    )
+    form_rate_limit_per_minute: int = Field(
+        default=10,
+        description="Max requests per minute per token to /form/* endpoints.",
+    )
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

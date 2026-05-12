@@ -116,14 +116,50 @@ uv run mypy
 uv run sphinx-build -b html docs docs/_build/html
 ```
 
+## HTTP endpoints
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/health` | none | Liveness probe |
+| `GET` | `/ready` | none | Readiness probe (Firestore ping) |
+| `POST` | `/collection-requests` | owner | Issue a signed form token for a contact |
+| `GET` | `/form/{token}` | none | Fetch form metadata for self-serve entry |
+| `POST` | `/form/{token}` | none | Submit form data; marks request fulfilled |
+
+The `/form/*` endpoints are rate-limited per token (default 10 req/min,
+configurable via `FORM_RATE_LIMIT_PER_MINUTE`). Tokens are HMAC-signed
+(SHA-256) and time-boxed (`FORM_TOKEN_TTL_SECONDS`, default 7 days).
+
 ## Layout
 
 ```
 src/birthday_tracker/
-├── main.py           # FastAPI app entry
-├── api/              # HTTP routers
-├── core/             # config, logging, security primitives
-├── models/           # Pydantic models (Contact, CollectionRequest, ...)
-├── services/         # business logic (issue collection request, parse response)
-└── adapters/         # external systems (firestore, twilio, gmail)
+├── main.py                        # FastAPI app entry
+├── api/
+│   ├── collection_requests.py     # POST /collection-requests
+│   ├── form.py                    # GET/POST /form/{token}
+│   ├── health.py                  # GET /health
+│   ├── ready.py                   # GET /ready
+│   ├── dependencies.py            # FastAPI DI wiring
+│   └── errors.py                  # RFC 7807 error handlers
+├── core/
+│   ├── config.py                  # Pydantic settings
+│   ├── tokens.py                  # HMAC token mint/verify
+│   ├── rate_limit.py              # Sliding-window per-key limiter
+│   ├── logging.py                 # structlog config
+│   └── health.py                  # Firestore readiness check
+├── models/                        # Pydantic domain models
+│   ├── contact.py
+│   ├── collection_request.py
+│   ├── address.py
+│   └── birthday.py
+├── services/
+│   ├── collection_requests.py     # CollectionRequestService (issue + fulfill)
+│   ├── repositories.py            # Repository protocols
+│   └── notifiers.py               # Notifier protocols (SMS / email)
+└── adapters/
+    ├── firestore.py               # Firestore-backed repositories
+    ├── in_memory.py               # In-memory repos for tests
+    ├── twilio.py                  # TwilioNotifier
+    └── gmail.py                   # GmailNotifier
 ```

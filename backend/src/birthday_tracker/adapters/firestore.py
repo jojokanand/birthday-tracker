@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from birthday_tracker.core.logging import get_logger
-from birthday_tracker.models import Contact
+from birthday_tracker.models import CollectionRequest, Contact
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from google.cloud.firestore import AsyncClient
@@ -20,6 +20,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 logger = get_logger(__name__)
 
 CONTACTS_COLLECTION = "contacts"
+COLLECTION_REQUESTS_COLLECTION = "collection_requests"
 
 
 def build_async_client(project_id: str) -> AsyncClient:
@@ -134,3 +135,80 @@ class FirestoreContactRepository:
             if data is not None:
                 results.append(Contact.model_validate(data))
         return results
+
+
+class FirestoreCollectionRequestRepository:
+    """Firestore-backed :class:`~birthday_tracker.services.CollectionRequestRepository`.
+
+    Documents are keyed by request UUID. Token-hash lookups use a Firestore
+    ``where`` query — for a personal-use app this stays cheap because the
+    collection never grows large; if it ever does, add a composite index.
+
+    Attributes:
+        client: Injected :class:`google.cloud.firestore.AsyncClient`.
+        collection_name: Name of the Firestore collection (overridable in
+            integration tests for isolation).
+    """
+
+    def __init__(
+        self,
+        client: AsyncClient,
+        collection_name: str = COLLECTION_REQUESTS_COLLECTION,
+    ) -> None:
+        """Build the repository.
+
+        Args:
+            client: Pre-built Firestore async client.
+            collection_name: Collection name. Defaults to ``"collection_requests"``.
+        """
+        self.client = client
+        self.collection_name = collection_name
+
+    def _doc_ref(self, request_id: UUID) -> Any:
+        """Document reference for ``request_id`` (typed as ``Any`` due to SDK stubs)."""
+        return self.client.collection(self.collection_name).document(str(request_id))
+
+    async def get(self, request_id: UUID) -> CollectionRequest | None:
+        """Fetch by UUID.
+
+        Args:
+            request_id: Request UUID.
+
+        Returns:
+            The :class:`CollectionRequest` or ``None`` if absent.
+        """
+        snapshot = await self._doc_ref(request_id).get()
+        if not snapshot.exists:
+            return None
+        return CollectionRequest.model_validate(snapshot.to_dict())
+
+    async def get_by_token_hash(self, token_hash: str) -> CollectionRequest | None:
+        """Fetch by issued-token hash.
+
+        Args:
+            token_hash: Hex SHA-256 digest of the issued token.
+
+        Returns:
+            The :class:`CollectionRequest` or ``None`` if no match.
+        """
+        from google.cloud.firestore_v1.base_query import FieldFilter  # noqa: PLC0415
+
+        query = (
+            self.client.collection(self.collection_name)
+            .where(filter=FieldFilter("token_hash", "==", token_hash))
+            .limit(1)
+        )
+        async for snapshot in query.stream():
+            data = snapshot.to_dict()
+            if data is not None:
+                return CollectionRequest.model_validate(data)
+        return None
+
+    async def save(self, request: CollectionRequest) -> None:
+        """Upsert ``request``.
+
+        Args:
+            request: Request to persist.
+        """
+        await self._doc_ref(request.id).set(request.model_dump(mode="json"))
+        logger.info("collection_request_saved", request_id=str(request.id))
