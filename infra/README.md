@@ -92,9 +92,19 @@ gcloud projects add-iam-policy-binding "$PROJECT_ID" \
   --member "serviceAccount:${SA_EMAIL}" \
   --role "roles/run.admin"
 
-# Allow Cloud Run to act as itself (required by deploy-cloudrun action)
+# Allow the deploy SA to use the default Compute Engine SA (left over from
+# an earlier deploy approach; harmless to keep).
 gcloud iam service-accounts add-iam-policy-binding \
   "${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
+  --member "serviceAccount:${SA_EMAIL}" \
+  --role "roles/iam.serviceAccountUser" \
+  --project "$PROJECT_ID"
+
+# Allow the deploy SA to "act as" itself, so the deploy-cloudrun action can
+# set it as the Cloud Run revision's runtime identity (via --service-account
+# in .github/workflows/deploy.yml). Without this binding, deployment fails
+# with: PERMISSION_DENIED: Permission 'iam.serviceaccounts.actAs' denied.
+gcloud iam service-accounts add-iam-policy-binding "${SA_EMAIL}" \
   --member "serviceAccount:${SA_EMAIL}" \
   --role "roles/iam.serviceAccountUser" \
   --project "$PROJECT_ID"
