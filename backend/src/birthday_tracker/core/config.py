@@ -93,6 +93,24 @@ class Settings(BaseSettings):
         description="Max requests per minute per token to /form/* endpoints.",
     )
 
+    # --- Daily digest ---
+    digest_owner_email: str = Field(
+        default="",
+        description="Email address the daily birthday digest is sent to.",
+    )
+    digest_timezone: str = Field(
+        default="UTC",
+        description="IANA timezone name used to determine 'today' for birthday date math.",
+    )
+    digest_oidc_audience: str = Field(
+        default="",
+        description=(
+            "Expected OIDC token audience for /internal/* routes "
+            "(typically the Cloud Run service URL). "
+            "When empty, OIDC validation is skipped (dev/test only)."
+        ),
+    )
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
