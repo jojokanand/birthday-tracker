@@ -18,6 +18,11 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
 
+    # Skip the entire job when GCP has not been provisioned yet (variables unset).
+    # Once the variables in Settings → Actions → Variables are populated the
+    # job will run automatically on the next push to main.
+    if: vars.GCP_PROJECT_ID != ''
+
     # id-token:write is required for Workload Identity Federation.
     permissions:
       contents: read
