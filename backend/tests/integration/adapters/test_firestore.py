@@ -1,0 +1,53 @@
+"""Integration tests for :class:`FirestoreContactRepository`.
+
+Runs the same contract that :mod:`tests.unit.adapters.test_in_memory` runs
+against the in-memory fake — if behavior diverges, one of the implementations
+has a bug.
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from birthday_tracker.adapters import FirestoreContactRepository
+from tests._contracts import contact_repository as contract
+
+
+@pytest.mark.integration
+async def test_get_missing(firestore_repo: FirestoreContactRepository) -> None:
+    await contract.assert_get_returns_none_for_missing(firestore_repo)
+
+
+@pytest.mark.integration
+async def test_save_and_get(firestore_repo: FirestoreContactRepository) -> None:
+    await contract.assert_save_and_get_roundtrip(firestore_repo)
+
+
+@pytest.mark.integration
+async def test_save_replaces(firestore_repo: FirestoreContactRepository) -> None:
+    await contract.assert_save_replaces_existing(firestore_repo)
+
+
+@pytest.mark.integration
+async def test_delete_existing(firestore_repo: FirestoreContactRepository) -> None:
+    await contract.assert_delete_existing_returns_true(firestore_repo)
+
+
+@pytest.mark.integration
+async def test_delete_missing(firestore_repo: FirestoreContactRepository) -> None:
+    await contract.assert_delete_missing_returns_false(firestore_repo)
+
+
+@pytest.mark.integration
+async def test_list_all_empty(firestore_repo: FirestoreContactRepository) -> None:
+    await contract.assert_list_all_empty(firestore_repo)
+
+
+@pytest.mark.integration
+async def test_list_all_returns_inserted(firestore_repo: FirestoreContactRepository) -> None:
+    await contract.assert_list_all_returns_inserted(firestore_repo)
+
+
+@pytest.mark.integration
+async def test_mutation_isolation(firestore_repo: FirestoreContactRepository) -> None:
+    await contract.assert_mutation_does_not_leak_into_store(firestore_repo)

@@ -23,13 +23,31 @@ uv run pytest -m integration                    # needs Firestore emulator
 uv run pytest --cov-report=html                 # HTML coverage report at htmlcov/
 ```
 
-To run the Firestore emulator locally:
+### Running the Firestore emulator locally
+
+The integration tests require the [Firestore emulator](https://cloud.google.com/firestore/native/docs/emulator),
+which itself needs **Java 21+** and the `cloud-firestore-emulator` gcloud
+component. One-time setup:
 
 ```bash
-gcloud emulators firestore start --host-port=localhost:8080
-export FIRESTORE_EMULATOR_HOST=localhost:8080
+brew install openjdk@21                                  # or any JDK 21+
+gcloud components install cloud-firestore-emulator
+```
+
+Per-session:
+
+```bash
+# Start the emulator (keeps running in the foreground; Ctrl-C to stop).
+gcloud emulators firestore start --host-port=localhost:8085
+
+# In a second terminal:
+export FIRESTORE_EMULATOR_HOST=localhost:8085
 uv run pytest -m integration
 ```
+
+When `FIRESTORE_EMULATOR_HOST` is unset, integration tests are skipped rather
+than failing. CI starts the emulator automatically (see
+`.github/workflows/ci-backend.yml`).
 
 ## Lint, types, docs
 

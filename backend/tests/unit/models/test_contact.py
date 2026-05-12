@@ -45,6 +45,13 @@ def test_contact_phone_parses_but_invalid_number_rejected() -> None:
 
 
 @pytest.mark.unit
+def test_contact_explicit_none_phone() -> None:
+    """Explicit ``phone=None`` triggers the validator's early-return branch."""
+    c = Contact(full_name="Ada", email="ada@example.com", phone=None)
+    assert c.phone is None
+
+
+@pytest.mark.unit
 def test_contact_requires_email_or_phone() -> None:
     with pytest.raises(ValidationError, match="at least one of email or phone"):
         Contact(full_name="Ada")
