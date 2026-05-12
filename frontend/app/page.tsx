@@ -31,6 +31,9 @@ import {
   type ContactResponse,
 } from "@/lib/format";
 
+/** Always render at request time — this page reads live backend data. */
+export const dynamic = "force-dynamic";
+
 /** Number of look-ahead days for the upcoming birthdays list. */
 const UPCOMING_DAYS = 30;
 

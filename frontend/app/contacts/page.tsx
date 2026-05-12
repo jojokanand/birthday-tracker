@@ -25,6 +25,9 @@ import { CreateContactDialog } from "@/components/create-contact-dialog";
 import { apiClient } from "@/lib/api";
 import { formatBirthday, type ContactResponse } from "@/lib/format";
 
+/** Always render at request time — this page reads live backend data. */
+export const dynamic = "force-dynamic";
+
 async function fetchContacts(): Promise<ContactResponse[]> {
   const { data, error } = await apiClient.GET("/contacts", {
     fetch: (input: RequestInfo | URL, init?: RequestInit) =>

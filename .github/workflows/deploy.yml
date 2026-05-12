@@ -68,7 +68,7 @@ jobs:
         run: |
           docker build \
             -f infra/Dockerfile.frontend \
-            --build-arg NEXT_PUBLIC_API_URL=${{ vars.BACKEND_URL }} \
+            --build-arg NEXT_PUBLIC_API_URL=${{ vars.BACKEND_URL || 'http://localhost:8000' }} \
             -t ${{ env.REGISTRY }}/frontend:${{ github.sha }} \
             -t ${{ env.REGISTRY }}/frontend:latest \
             .

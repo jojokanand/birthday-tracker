@@ -12,9 +12,14 @@
 import createClient from "openapi-fetch";
 import type { paths } from "./api-types";
 
-/** Base URL read from the environment (falls back to localhost for local dev). */
+/** Base URL read from the environment (falls back to localhost for local dev).
+ *
+ * `||` (not `??`) because the deploy workflow passes the build arg as an
+ * empty string when `BACKEND_URL` is unset (first deploy) — `??` would let
+ * that through and break URL parsing during the Next.js build.
+ */
 const BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+  process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 /**
  * Pre-configured `openapi-fetch` client typed against the backend's OpenAPI
