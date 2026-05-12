@@ -47,17 +47,23 @@ async def request_repo() -> AsyncIterator[FirestoreCollectionRequestRepository]:
             await snapshot.reference.delete()
 
 
-def _make_request(**kwargs: object) -> CollectionRequest:
+def _make_request(
+    contact_id: uuid.UUID | None = None,
+    channel: Channel = Channel.email,
+    destination: str = "ada@example.com",
+    token_hash: str = "a" * 64,
+    expires_at: dt.datetime | None = None,
+    fulfilled_at: dt.datetime | None = None,
+) -> CollectionRequest:
     """Build a minimal :class:`CollectionRequest` for testing."""
-    defaults: dict[str, object] = {
-        "contact_id": uuid.uuid4(),
-        "channel": Channel.email,
-        "destination": "ada@example.com",
-        "token_hash": "a" * 64,
-        "expires_at": dt.datetime.now(dt.UTC) + dt.timedelta(days=7),
-    }
-    defaults.update(kwargs)
-    return CollectionRequest(**defaults)  # type: ignore[arg-type]
+    return CollectionRequest(
+        contact_id=contact_id or uuid.uuid4(),
+        channel=channel,
+        destination=destination,
+        token_hash=token_hash,
+        expires_at=expires_at or dt.datetime.now(dt.UTC) + dt.timedelta(days=7),
+        fulfilled_at=fulfilled_at,
+    )
 
 
 @pytest.mark.integration

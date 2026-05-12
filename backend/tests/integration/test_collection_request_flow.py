@@ -28,7 +28,7 @@ from birthday_tracker.core.config import AppEnv, Settings
 from birthday_tracker.core.config import get_settings as get_settings_dep
 from birthday_tracker.core.rate_limit import RateLimiter
 from birthday_tracker.main import create_app
-from birthday_tracker.models import Contact
+from birthday_tracker.models import Channel, Contact
 from birthday_tracker.services.collection_requests import CollectionRequestService
 
 _TOKEN_SECRET = "integration-test-secret"
@@ -214,7 +214,7 @@ async def test_rate_limit_blocks_excess_requests(
         token_ttl_seconds=3600,
         public_base_url=_BASE_URL,
     )
-    issued = await svc.issue(contact_id=c.id, channel="email", destination="t@example.com")  # type: ignore[arg-type]
+    issued = await svc.issue(contact_id=c.id, channel=Channel.email, destination="t@example.com")
     token = issued.token
 
     get_settings_dep.cache_clear()
