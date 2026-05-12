@@ -203,6 +203,40 @@ Contacts endpoint
    :model-show-json: False
    :model-show-config-summary: False
 
+Digest endpoint
+~~~~~~~~~~~~~~~
+
+.. autofunction:: birthday_tracker.api.digest.get_upcoming_birthdays
+
+.. autofunction:: birthday_tracker.api.digest.send_digest
+
+.. autofunction:: birthday_tracker.api.digest.require_scheduler_auth
+
+.. autopydantic_model:: birthday_tracker.api.digest.UpcomingBirthdayResponse
+   :model-show-json: False
+   :model-show-config-summary: False
+
+.. autopydantic_model:: birthday_tracker.api.digest.DigestUpcomingResponse
+   :model-show-json: False
+   :model-show-config-summary: False
+
+.. autopydantic_model:: birthday_tracker.api.digest.DigestSendResponse
+   :model-show-json: False
+   :model-show-config-summary: False
+
+Digest service
+~~~~~~~~~~~~~~
+
+.. autoclass:: birthday_tracker.services.digest.DigestService
+   :members:
+   :show-inheritance:
+
+.. autoclass:: birthday_tracker.services.digest.UpcomingBirthday
+   :members:
+   :show-inheritance:
+
+.. autofunction:: birthday_tracker.services.digest._days_until
+
 Collection-requests endpoint
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

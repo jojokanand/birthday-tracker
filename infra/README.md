@@ -242,6 +242,70 @@ gh api repos/${GITHUB_ORG}/${GITHUB_REPO}/branches/main/protection \
 
 ---
 
+## 11. Cloud Scheduler — daily birthday digest
+
+The backend exposes `POST /internal/digest/send` which the scheduler hits once
+per morning.  Cloud Scheduler attaches a short-lived OIDC token; the backend
+validates it against the service URL.
+
+### 11a. Set the backend URL in Settings
+
+After the first deploy, retrieve the backend URL and set it as the
+`DIGEST_OIDC_AUDIENCE` environment variable on the Cloud Run service:
+
+```bash
+BACKEND_URL=$(gcloud run services describe birthday-tracker-backend \
+  --region "$REGION" --project "$PROJECT_ID" \
+  --format='value(status.url)')
+
+gcloud run services update birthday-tracker-backend \
+  --set-env-vars "DIGEST_OIDC_AUDIENCE=${BACKEND_URL}" \
+  --region "$REGION" --project "$PROJECT_ID"
+
+gcloud run services update birthday-tracker-backend \
+  --set-env-vars "DIGEST_OWNER_EMAIL=your-email@example.com" \
+  --region "$REGION" --project "$PROJECT_ID"
+```
+
+### 11b. Create the Cloud Scheduler job
+
+```bash
+# Replace with the owner's IANA timezone, e.g. "America/New_York"
+OWNER_TZ="America/New_York"
+
+gcloud scheduler jobs create http birthday-digest-daily \
+  --schedule="0 8 * * *" \
+  --time-zone="${OWNER_TZ}" \
+  --uri="${BACKEND_URL}/internal/digest/send" \
+  --http-method=POST \
+  --oidc-service-account-email="${SA_EMAIL}" \
+  --oidc-token-audience="${BACKEND_URL}" \
+  --location="$REGION" \
+  --project "$PROJECT_ID"
+```
+
+### 11c. Test manually
+
+```bash
+# Trigger the job immediately (does not wait for the schedule).
+gcloud scheduler jobs run birthday-digest-daily \
+  --location="$REGION" --project "$PROJECT_ID"
+
+# Or call the endpoint directly with a service-account token:
+TOKEN=$(gcloud auth print-identity-token)
+curl -X POST "${BACKEND_URL}/internal/digest/send" \
+  -H "Authorization: Bearer ${TOKEN}"
+```
+
+### 11d. Preview upcoming birthdays
+
+```bash
+curl "${BACKEND_URL}/internal/digest/upcoming?days=14" \
+  -H "Authorization: Bearer $(gcloud auth print-identity-token)"
+```
+
+---
+
 ## Ongoing operations
 
 | Task | Command |
