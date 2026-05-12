@@ -290,6 +290,42 @@ step 11.
 
 ---
 
+## 9a. Allow public network access to both services
+
+```bash
+gcloud run services add-iam-policy-binding birthday-tracker-backend \
+  --member="allUsers" --role="roles/run.invoker" \
+  --region "$REGION" --project "$PROJECT_ID"
+
+gcloud run services add-iam-policy-binding birthday-tracker-frontend \
+  --member="allUsers" --role="roles/run.invoker" \
+  --region "$REGION" --project "$PROJECT_ID"
+```
+
+Both services are called from a browser, so Cloud Run's network-level
+gate must accept anonymous traffic. Without this binding the frontend
+URL returns Cloud Run's `Error: Forbidden` page, and the dashboard hangs
+on "Loading…" because browser CORS preflight (`OPTIONS`) requests carry
+no `Authorization` header and get rejected at the edge before they ever
+reach the app.
+
+Security comes from the application layer, not from this binding:
+
+- The backend's `require_user` dependency verifies a Firebase ID token on
+  every owner-side route and returns 401 to anything unauthenticated.
+- The dashboard pages are wrapped in `<AuthGuard>`, which redirects
+  signed-out visitors to `/sign-in`.
+- The form-token routes (`/form/{token}`) are intentionally public — the
+  signed token in the URL is the credential.
+
+**Do not remove this binding** on a service the browser calls directly.
+The right way to lock the backend further is Identity-Aware Proxy in
+front of the service (which requires a load balancer); revoking
+`run.invoker` on its own just breaks CORS without changing what the app
+allows.
+
+---
+
 ## 10. Branch protection on `main`
 
 > **Note:** branch protection rules on private repositories require **GitHub Pro**
@@ -390,4 +426,5 @@ curl "${BACKEND_URL}/internal/digest/upcoming?days=14" \
 | Force redeploy (same image) | Push any commit to `main` |
 | Rotate a secret | Add a new secret version (step 7) |
 | Rotate the runtime service account | `gcloud run services update birthday-tracker-{backend,frontend} --service-account "${SA_EMAIL}" --region "$REGION" --project "$PROJECT_ID"` (run once per service, only after the first deploy) |
+| Cloud Run IAM `allUsers → run.invoker` | Required on both services (see step 9a). Removing it on a browser-facing service breaks CORS preflight and hangs the dashboard; security is enforced at the app layer. |
 | Scale to zero (cost saving) | Cloud Run does this automatically when idle |
