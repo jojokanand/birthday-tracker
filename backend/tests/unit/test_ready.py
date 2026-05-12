@@ -22,6 +22,17 @@ class _FakeAsyncCollections:
         yield object()
 
 
+class _EmptyAsyncCollections:
+    """Async iterable that yields nothing — covers the empty-iter branch."""
+
+    def __aiter__(self) -> AsyncIterator[Any]:
+        return self._gen()
+
+    async def _gen(self) -> AsyncIterator[Any]:
+        if False:  # pragma: no cover - generator must be async; never yields
+            yield
+
+
 class _FakeFirestoreClient:
     """Minimal stand-in for `google.cloud.firestore.AsyncClient`."""
 
@@ -30,6 +41,14 @@ class _FakeFirestoreClient:
 
     def collections(self) -> _FakeAsyncCollections:
         return _FakeAsyncCollections()
+
+
+class _EmptyFirestoreClient:
+    def __init__(self, *_: Any, **__: Any) -> None:
+        pass
+
+    def collections(self) -> _EmptyAsyncCollections:
+        return _EmptyAsyncCollections()
 
 
 class _FailingFirestoreClient:
@@ -57,6 +76,15 @@ def test_ready_returns_503_when_firestore_unreachable(client: TestClient) -> Non
     body = response.json()
     assert body["status"] == "not_ready"
     assert "connection refused" in body["firestore"]
+
+
+@pytest.mark.unit
+def test_ready_returns_200_when_collections_iter_is_empty(client: TestClient) -> None:
+    """An empty Firestore project still proves reachability — covers the no-break branch."""
+    with patch("google.cloud.firestore.AsyncClient", _EmptyFirestoreClient):
+        response = client.get("/ready")
+    assert response.status_code == 200
+    assert response.json() == {"status": "ready", "firestore": "ok"}
 
 
 @pytest.mark.unit

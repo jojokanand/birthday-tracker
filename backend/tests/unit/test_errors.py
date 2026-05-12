@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 from fastapi import APIRouter
 from fastapi.testclient import TestClient
+from pydantic import BaseModel
 
 from birthday_tracker.api.errors import PROBLEM_JSON, APIError
 from birthday_tracker.core.config import AppEnv, Settings
@@ -12,6 +13,11 @@ from birthday_tracker.core.config import get_settings as get_settings_dep
 from birthday_tracker.main import create_app
 
 _extra_router = APIRouter()
+
+
+class _Payload(BaseModel):
+    name: str
+    count: int
 
 
 @_extra_router.get("/raise-api-error")
@@ -29,6 +35,12 @@ def _raise_api_error() -> None:
 def _raise_unhandled() -> None:
     """Test-only route that raises a generic Exception."""
     raise RuntimeError("boom")
+
+
+@_extra_router.post("/echo-payload")
+def _echo_payload(payload: _Payload) -> dict[str, str | int]:
+    """Test-only route used to trigger the request-validation handler."""
+    return {"name": payload.name, "count": payload.count}
 
 
 @pytest.fixture
@@ -63,6 +75,19 @@ def test_unknown_route_returns_problem_json_404(app_client: TestClient) -> None:
     body = response.json()
     assert body["status"] == 404
     assert body["instance"] == "/does-not-exist"
+
+
+@pytest.mark.unit
+def test_validation_error_returns_problem_json_422(app_client: TestClient) -> None:
+    response = app_client.post("/echo-payload", json={"name": "ok", "count": "not-an-int"})
+    assert response.status_code == 422
+    assert response.headers["content-type"].startswith(PROBLEM_JSON)
+    body = response.json()
+    assert body["title"] == "Request validation failed"
+    assert body["status"] == 422
+    assert body["instance"] == "/echo-payload"
+    assert body["errors"]
+    assert body["errors"][0]["loc"][-1] == "count"
 
 
 @pytest.mark.unit

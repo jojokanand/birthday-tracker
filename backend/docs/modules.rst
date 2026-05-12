@@ -94,3 +94,31 @@ Domain models
    :members:
    :undoc-members:
    :show-inheritance:
+
+Repositories (services layer)
+-----------------------------
+
+.. automodule:: birthday_tracker.services
+   :members:
+
+.. autoclass:: birthday_tracker.services.repositories.ContactRepository
+   :members:
+   :show-inheritance:
+   :no-index:
+
+Adapters
+--------
+
+.. automodule:: birthday_tracker.adapters
+   :members:
+   :exclude-members: InMemoryContactRepository, FirestoreContactRepository
+
+.. autoclass:: birthday_tracker.adapters.in_memory.InMemoryContactRepository
+   :members:
+   :show-inheritance:
+
+.. autoclass:: birthday_tracker.adapters.firestore.FirestoreContactRepository
+   :members:
+   :show-inheritance:
+
+.. autofunction:: birthday_tracker.adapters.firestore.build_async_client
