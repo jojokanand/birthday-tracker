@@ -19,7 +19,7 @@ import { useAuth } from "@/lib/auth-context";
  * and hide owner-only links when no user is signed in.
  */
 export function Nav() {
-  const { user } = useAuth();
+  const { isAuthed } = useAuth();
   const pathname = usePathname();
   const isSignIn = pathname === "/sign-in";
 
@@ -27,13 +27,13 @@ export function Nav() {
     <header className="border-b bg-background">
       <div className="mx-auto max-w-5xl flex items-center gap-6 px-4 py-3">
         <Link
-          href={user ? "/" : "/sign-in"}
+          href={isAuthed ? "/" : "/sign-in"}
           className="flex items-center gap-2 text-sm font-semibold tracking-tight"
         >
           <Cake className="size-5 text-primary" />
           Birthday Tracker
         </Link>
-        {user && !isSignIn && (
+        {isAuthed && !isSignIn && (
           <nav className="flex items-center gap-4 text-sm text-muted-foreground">
             <Link href="/" className="hover:text-foreground transition-colors">
               Upcoming

@@ -25,16 +25,17 @@ import { useAuth } from "@/lib/auth-context";
 
 /** Render the sign-in page. */
 export default function SignInPage() {
-  const { user, loading, signInWithGoogle, configured } = useAuth();
+  const { isAuthed, loading, signInWithGoogle, configured } = useAuth();
   const router = useRouter();
   const [error, setError] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
 
   React.useEffect(() => {
-    if (!loading && user) {
+    // Already authed (real user) — or dev mode (no Firebase) — go home.
+    if (!loading && isAuthed) {
       router.replace("/");
     }
-  }, [loading, user, router]);
+  }, [loading, isAuthed, router]);
 
   const handleClick = async () => {
     setError(null);

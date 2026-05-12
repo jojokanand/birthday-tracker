@@ -46,13 +46,13 @@ export default function ContactsPage() {
 
 function ContactsContent() {
   const api = useApiClient();
-  const { user } = useAuth();
+  const { isAuthed } = useAuth();
   const [contacts, setContacts] = React.useState<ContactResponse[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [refreshKey, setRefreshKey] = React.useState(0);
 
   React.useEffect(() => {
-    if (!user) return;
+    if (!isAuthed) return;
     let alive = true;
     (async () => {
       const { data, error } = await api.GET("/contacts", {});
@@ -63,7 +63,7 @@ function ContactsContent() {
     return () => {
       alive = false;
     };
-  }, [api, user, refreshKey]);
+  }, [api, isAuthed, refreshKey]);
 
   const onCreated = React.useCallback(() => {
     setRefreshKey((k) => k + 1);

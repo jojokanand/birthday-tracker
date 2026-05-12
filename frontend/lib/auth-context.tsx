@@ -38,6 +38,14 @@ export interface AuthState {
   getIdToken: (forceRefresh?: boolean) => Promise<string | null>;
   /** ``true`` when the Firebase config env vars are present. */
   configured: boolean;
+  /**
+   * Treat the visitor as authenticated for the purposes of route guards
+   * and navigation visibility. ``true`` when a real Firebase user is
+   * signed in **or** when Firebase isn't configured at all — the latter
+   * mirrors the backend's ``APP_ENV=development`` bypass so the app
+   * stays usable in local dev / E2E without a real Firebase project.
+   */
+  isAuthed: boolean;
 }
 
 const AuthContext = React.createContext<AuthState | null>(null);
@@ -96,9 +104,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [configured],
   );
 
+  const isAuthed = !configured || Boolean(user);
   const value = React.useMemo<AuthState>(
-    () => ({ user, loading, signInWithGoogle, signOut, getIdToken, configured }),
-    [user, loading, signInWithGoogle, signOut, getIdToken, configured],
+    () => ({
+      user,
+      loading,
+      signInWithGoogle,
+      signOut,
+      getIdToken,
+      configured,
+      isAuthed,
+    }),
+    [user, loading, signInWithGoogle, signOut, getIdToken, configured, isAuthed],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

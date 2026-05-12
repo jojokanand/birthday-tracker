@@ -58,12 +58,12 @@ export default function HomePage() {
 /** Inner component rendered only after the user is signed in. */
 function HomeContent() {
   const api = useApiClient();
-  const { user } = useAuth();
+  const { isAuthed } = useAuth();
   const [contacts, setContacts] = React.useState<ContactResponse[]>([]);
   const [loading, setLoading] = React.useState(true);
 
   React.useEffect(() => {
-    if (!user) return;
+    if (!isAuthed) return;
     let alive = true;
     (async () => {
       const { data, error } = await api.GET("/contacts", {
@@ -76,7 +76,7 @@ function HomeContent() {
     return () => {
       alive = false;
     };
-  }, [api, user]);
+  }, [api, isAuthed]);
 
   if (loading) {
     return (

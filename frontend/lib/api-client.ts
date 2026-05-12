@@ -33,11 +33,21 @@ export function useApiClient(): Client<paths> {
   return React.useMemo(() => {
     const authedFetch: typeof fetch = async (input, init) => {
       const token = await getIdToken();
-      const headers = new Headers(init?.headers);
-      if (token && !headers.has("Authorization")) {
-        headers.set("Authorization", `Bearer ${token}`);
+      if (!token) {
+        // No token to add — pass the request through untouched so we
+        // don't accidentally drop headers (notably Content-Type) that
+        // openapi-fetch already set on the Request object.
+        return fetch(input, init);
       }
-      return fetch(input, { ...init, headers, cache: "no-store" });
+      if (input instanceof Request) {
+        // Clone the Request with an additional Authorization header.
+        const headers = new Headers(input.headers);
+        headers.set("Authorization", `Bearer ${token}`);
+        return fetch(new Request(input, { headers }), init);
+      }
+      const headers = new Headers(init?.headers);
+      headers.set("Authorization", `Bearer ${token}`);
+      return fetch(input, { ...init, headers });
     };
     return createClient<paths>({ baseUrl: BASE_URL, fetch: authedFetch });
   }, [getIdToken]);

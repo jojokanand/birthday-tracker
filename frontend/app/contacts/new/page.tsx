@@ -40,7 +40,7 @@ export default function NewCollectionRequestPage() {
 
 function NewCollectionRequestContent() {
   const api = useApiClient();
-  const { user } = useAuth();
+  const { isAuthed } = useAuth();
   const searchParams = useSearchParams();
   const initialContactId = searchParams.get("contact_id") ?? undefined;
 
@@ -48,7 +48,7 @@ function NewCollectionRequestContent() {
   const [loading, setLoading] = React.useState(true);
 
   React.useEffect(() => {
-    if (!user) return;
+    if (!isAuthed) return;
     let alive = true;
     (async () => {
       const { data, error } = await api.GET("/contacts", {});
@@ -59,7 +59,7 @@ function NewCollectionRequestContent() {
     return () => {
       alive = false;
     };
-  }, [api, user]);
+  }, [api, isAuthed]);
 
   if (loading) {
     return <div className="text-sm text-muted-foreground">Loading…</div>;
