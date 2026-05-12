@@ -1,0 +1,16 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "entryPoints": [
+    "lib/api.ts",
+    "lib/format.ts",
+    "components/nav.tsx",
+    "components/create-contact-dialog.tsx",
+    "components/issue-request-form.tsx",
+    "components/self-serve-form.tsx"
+  ],
+  "out": "docs",
+  "plugin": [],
+  "name": "Birthday Tracker Frontend",
+  "readme": "none",
+  "skipErrorChecking": true
+}

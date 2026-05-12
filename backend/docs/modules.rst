@@ -178,6 +178,31 @@ Collection request service
 .. autoexception:: birthday_tracker.services.collection_requests.RequestNotPending
    :show-inheritance:
 
+Contacts endpoint
+~~~~~~~~~~~~~~~~~
+
+.. autofunction:: birthday_tracker.api.contacts.list_contacts
+
+.. autofunction:: birthday_tracker.api.contacts.create_contact
+
+.. autofunction:: birthday_tracker.api.contacts.get_contact
+
+.. autofunction:: birthday_tracker.api.contacts.update_contact
+
+.. autofunction:: birthday_tracker.api.contacts.delete_contact
+
+.. autopydantic_model:: birthday_tracker.api.contacts.CreateContactBody
+   :model-show-json: False
+   :model-show-config-summary: False
+
+.. autopydantic_model:: birthday_tracker.api.contacts.UpdateContactBody
+   :model-show-json: False
+   :model-show-config-summary: False
+
+.. autopydantic_model:: birthday_tracker.api.contacts.ContactResponse
+   :model-show-json: False
+   :model-show-config-summary: False
+
 Collection-requests endpoint
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

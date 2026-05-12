@@ -1,23 +1,41 @@
 # Frontend — Birthday Tracker Dashboard
 
-> **Status:** placeholder. Full Next.js scaffolding is tracked in
-> [issue #6](../../issues). This directory exists so the repo layout matches
-> [PROJECT_PLAN.md](../PROJECT_PLAN.md#project-structure).
+Next.js 16 App Router (TypeScript + Tailwind + shadcn/ui) dashboard for the
+Birthday Tracker backend.
 
-## Planned stack
+## Stack
 
-- Next.js (App Router) + TypeScript
-- Tailwind CSS + shadcn/ui
-- Generated API client from the backend's OpenAPI spec
-- Playwright for E2E tests, Vitest for unit tests
+- **Next.js 16** — App Router, Server + Client Components
+- **Tailwind CSS** + **shadcn/ui** (base-ui variant)
+- **openapi-fetch** — typed API client generated from the backend's OpenAPI schema
+- **react-hook-form** + **Zod** — form validation
+- **Vitest** + **@testing-library/react** — unit tests
+- **TypeDoc** — API documentation
 
-## Planned commands
+## Commands
 
 ```bash
-cd frontend
-npm install
+npm install          # install dependencies
 npm run dev          # http://localhost:3000
-npm run test         # Vitest
-npm run test:e2e     # Playwright
-npm run build
+npm run lint         # ESLint
+npm run typecheck    # tsc --noEmit
+npm test             # Vitest (unit tests)
+npm run build        # production build
+npm run gen:api      # regenerate lib/api-types.ts from openapi.json
+npm run docs         # generate TypeDoc into docs/
 ```
+
+## Pages
+
+| Route | Description |
+|---|---|
+| `/` | Upcoming birthdays (next 30 days) |
+| `/contacts` | Contact list with add-contact dialog |
+| `/contacts/new` | Issue a collection-request form link |
+| `/form/[token]` | Public self-serve form for contacts |
+
+## Environment
+
+| Variable | Default | Description |
+|---|---|---|
+| `NEXT_PUBLIC_API_URL` | `http://localhost:8000` | Backend base URL |
