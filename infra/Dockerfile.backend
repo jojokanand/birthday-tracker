@@ -1,0 +1,43 @@
+# syntax=docker/dockerfile:1
+# ---------------------------------------------------------------------------
+# Stage 1 — install Python dependencies with uv into an isolated venv
+# ---------------------------------------------------------------------------
+FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS builder
+
+WORKDIR /app
+
+# Copy only the dependency manifest first so this layer is cached unless deps change.
+COPY backend/pyproject.toml backend/uv.lock ./
+
+# Install runtime deps only (no dev extras). --no-install-project skips the
+# project itself so the next COPY (source) doesn't bust the dep cache.
+RUN uv sync --frozen --no-dev --no-install-project
+
+# Copy source and install the project package.
+COPY backend/src ./src
+RUN uv sync --frozen --no-dev
+
+# ---------------------------------------------------------------------------
+# Stage 2 — lean runtime image (no uv, no build tooling)
+# ---------------------------------------------------------------------------
+FROM python:3.12-slim AS runtime
+
+WORKDIR /app
+
+# Copy the virtualenv and installed source package from the builder.
+COPY --from=builder /app/.venv /app/.venv
+COPY --from=builder /app/src /app/src
+
+# Put the venv on PATH so `uvicorn` and library imports resolve correctly.
+ENV PATH="/app/.venv/bin:$PATH" \
+    PYTHONUNBUFFERED=1 \
+    PORT=8080
+
+EXPOSE 8080
+
+# `birthday_tracker.main:app` is the module-level FastAPI singleton produced
+# by the create_app() factory at import time.
+CMD ["uvicorn", "birthday_tracker.main:app", \
+     "--host", "0.0.0.0", \
+     "--port", "8080", \
+     "--workers", "1"]
