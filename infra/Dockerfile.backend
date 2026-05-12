@@ -6,8 +6,10 @@ FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS builder
 
 WORKDIR /app
 
-# Copy only the dependency manifest first so this layer is cached unless deps change.
-COPY backend/pyproject.toml backend/uv.lock ./
+# Copy the dependency manifest and README (referenced by pyproject.toml's
+# `readme` field, validated by hatchling when the project is built below).
+# Putting these first keeps the layer cached unless deps or the README change.
+COPY backend/pyproject.toml backend/uv.lock backend/README.md ./
 
 # Install runtime deps only (no dev extras). --no-install-project skips the
 # project itself so the next COPY (source) doesn't bust the dep cache.
