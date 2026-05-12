@@ -51,6 +51,30 @@ class Settings(BaseSettings):
         description="Set to host:port to redirect Firestore client to the emulator.",
     )
 
+    # --- Twilio (SMS) ---
+    # Empty defaults so the app can boot without notification creds (e.g. local
+    # dev focused on the dashboard). Adapters validate presence at construction.
+    twilio_account_sid: str = Field(default="", description="Twilio Account SID.")
+    twilio_auth_token: str = Field(default="", description="Twilio Auth Token.")
+    twilio_from_number: str = Field(
+        default="",
+        description="E.164 phone number SMS originates from.",
+    )
+
+    # --- Gmail API (OAuth) ---
+    gmail_oauth_client_secrets_path: str = Field(
+        default="",
+        description="Path to OAuth client_secret.json downloaded from GCP Console.",
+    )
+    gmail_oauth_token_path: str = Field(
+        default="",
+        description="Path where the cached OAuth refresh token is stored.",
+    )
+    gmail_from_address: str = Field(
+        default="",
+        description="Email address sent on behalf of (must match the OAuth grant).",
+    )
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

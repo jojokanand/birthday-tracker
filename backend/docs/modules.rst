@@ -95,8 +95,8 @@ Domain models
    :undoc-members:
    :show-inheritance:
 
-Repositories (services layer)
------------------------------
+Services layer (Protocols)
+--------------------------
 
 .. automodule:: birthday_tracker.services
    :members:
@@ -106,12 +106,26 @@ Repositories (services layer)
    :show-inheritance:
    :no-index:
 
+.. autoclass:: birthday_tracker.services.notifiers.SmsNotifier
+   :members:
+   :show-inheritance:
+   :no-index:
+
+.. autoclass:: birthday_tracker.services.notifiers.EmailNotifier
+   :members:
+   :show-inheritance:
+   :no-index:
+
+.. autoexception:: birthday_tracker.services.notifiers.NotificationError
+   :show-inheritance:
+   :no-index:
+
 Adapters
 --------
 
 .. automodule:: birthday_tracker.adapters
    :members:
-   :exclude-members: InMemoryContactRepository, FirestoreContactRepository
+   :exclude-members: InMemoryContactRepository, FirestoreContactRepository, TwilioNotifier, GmailNotifier
 
 .. autoclass:: birthday_tracker.adapters.in_memory.InMemoryContactRepository
    :members:
@@ -122,3 +136,17 @@ Adapters
    :show-inheritance:
 
 .. autofunction:: birthday_tracker.adapters.firestore.build_async_client
+
+.. autoclass:: birthday_tracker.adapters.twilio.TwilioNotifier
+   :members:
+   :show-inheritance:
+
+.. autofunction:: birthday_tracker.adapters.twilio.build_twilio_client
+
+.. autoclass:: birthday_tracker.adapters.gmail.GmailNotifier
+   :members:
+   :show-inheritance:
+
+.. autofunction:: birthday_tracker.adapters.gmail.load_gmail_credentials
+
+.. autofunction:: birthday_tracker.adapters.gmail.build_gmail_service
