@@ -143,7 +143,9 @@ async def get_form_metadata(
     except (TokenInvalid, TokenExpired, RequestNotPending) as exc:
         raise _token_failure_to_api_error(exc) from exc
 
-    contact = await service.contacts.get(request.contact_id)
+    # Token is the bearer credential — scope the contact lookup to the
+    # request's recorded owner so we never expose another tenant's contact.
+    contact = await service.contacts.get(request.contact_id, request.owner_id)
     greeting = (contact.preferred_name if contact else None) or "there"
     return FormMetadataResponse(
         greeting_name=greeting,

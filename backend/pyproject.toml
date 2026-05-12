@@ -15,6 +15,8 @@ dependencies = [
     "pydantic-settings>=2.6,<3.0",
     "google-cloud-firestore>=2.19,<3.0",
     "google-cloud-secret-manager>=2.21,<3.0",
+    "firebase-admin>=6.5,<7.0",                # Firebase Auth ID token verification
+
     "google-api-python-client>=2.150,<3.0",   # Gmail API
     "google-auth-oauthlib>=1.2,<2.0",         # Gmail OAuth flow
     "twilio>=9.3,<10.0",
@@ -86,7 +88,7 @@ files = ["src", "tests"]
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-module = ["googleapiclient.*", "google_auth_oauthlib.*", "twilio.*"]
+module = ["googleapiclient.*", "google_auth_oauthlib.*", "twilio.*", "firebase_admin.*"]
 ignore_missing_imports = true
 
 # ---------- pytest ----------

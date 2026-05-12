@@ -7,7 +7,6 @@
 "use client";
 
 import * as React from "react";
-import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -22,7 +21,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { apiClient } from "@/lib/api";
+import { useApiClient } from "@/lib/api-client";
 
 const schema = z
   .object({
@@ -41,13 +40,17 @@ type FormValues = z.infer<typeof schema>;
 /**
  * Floating dialog containing the "Create contact" form.
  *
- * On successful creation the page is refreshed via `router.refresh()` so the
- * contacts table picks up the new row without a full navigation.
+ * @param onCreated Invoked after a successful POST so the parent page can
+ *   refresh its contact list.
  */
-export function CreateContactDialog() {
+export function CreateContactDialog({
+  onCreated,
+}: {
+  onCreated?: () => void;
+}) {
   const [open, setOpen] = React.useState(false);
   const [serverError, setServerError] = React.useState<string | null>(null);
-  const router = useRouter();
+  const api = useApiClient();
 
   const {
     register,
@@ -58,7 +61,7 @@ export function CreateContactDialog() {
 
   async function onSubmit(values: FormValues) {
     setServerError(null);
-    const { error } = await apiClient.POST("/contacts", {
+    const { error } = await api.POST("/contacts", {
       body: {
         full_name: values.full_name,
         preferred_name: values.preferred_name || null,
@@ -72,7 +75,7 @@ export function CreateContactDialog() {
     }
     reset();
     setOpen(false);
-    router.refresh();
+    onCreated?.();
   }
 
   return (

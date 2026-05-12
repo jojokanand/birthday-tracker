@@ -43,15 +43,38 @@ async def test_delete_missing(repo: InMemoryContactRepository) -> None:
 
 
 @pytest.mark.unit
-async def test_list_all_empty(repo: InMemoryContactRepository) -> None:
-    await contract.assert_list_all_empty(repo)
+async def test_list_for_owner_empty(repo: InMemoryContactRepository) -> None:
+    await contract.assert_list_for_owner_empty(repo)
 
 
 @pytest.mark.unit
-async def test_list_all_returns_inserted(repo: InMemoryContactRepository) -> None:
-    await contract.assert_list_all_returns_inserted(repo)
+async def test_list_for_owner_returns_inserted(repo: InMemoryContactRepository) -> None:
+    await contract.assert_list_for_owner_returns_inserted(repo)
 
 
 @pytest.mark.unit
 async def test_mutation_isolation(repo: InMemoryContactRepository) -> None:
     await contract.assert_mutation_does_not_leak_into_store(repo)
+
+
+# ----- Cross-tenant isolation -------------------------------------------
+
+
+@pytest.mark.unit
+async def test_get_filters_by_owner(repo: InMemoryContactRepository) -> None:
+    await contract.assert_get_filters_by_owner(repo)
+
+
+@pytest.mark.unit
+async def test_delete_filters_by_owner(repo: InMemoryContactRepository) -> None:
+    await contract.assert_delete_filters_by_owner(repo)
+
+
+@pytest.mark.unit
+async def test_list_for_owner_isolates_tenants(repo: InMemoryContactRepository) -> None:
+    await contract.assert_list_for_owner_isolates_tenants(repo)
+
+
+@pytest.mark.unit
+async def test_duplicate_details_across_tenants(repo: InMemoryContactRepository) -> None:
+    await contract.assert_duplicate_details_across_tenants_allowed(repo)

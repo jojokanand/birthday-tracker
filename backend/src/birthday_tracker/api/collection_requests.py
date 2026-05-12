@@ -15,11 +15,11 @@ from fastapi import APIRouter, Depends, status
 from pydantic import BaseModel, Field
 
 from birthday_tracker.api.dependencies import (
-    OwnerIdentity,
     get_collection_request_service,
-    require_owner,
+    require_user,
 )
 from birthday_tracker.api.errors import APIError
+from birthday_tracker.core.auth import Identity
 from birthday_tracker.models import Channel
 from birthday_tracker.services.collection_requests import (
     CollectionRequestService,
@@ -56,31 +56,34 @@ class IssuedRequestResponse(BaseModel):
     "",
     response_model=IssuedRequestResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="Issue a new collection request (owner only)",
+    summary="Issue a new collection request",
 )
 async def issue_collection_request(
     body: IssueRequestBody,
     service: Annotated[CollectionRequestService, Depends(get_collection_request_service)],
-    _owner: Annotated[OwnerIdentity, Depends(require_owner())],
+    identity: Annotated[Identity, Depends(require_user)],
 ) -> IssuedRequestResponse:
-    """Mint a token and persist a pending collection request.
+    """Mint a token and persist a pending collection request for the caller.
 
     Args:
         body: Request payload with ``contact_id``, ``channel``, ``destination``.
         service: Injected :class:`CollectionRequestService`.
-        _owner: Authenticated owner identity (stub — real auth in issue #7).
+        identity: Authenticated caller — must own the referenced contact.
 
     Returns:
         :class:`IssuedRequestResponse` carrying the public form URL.
 
     Raises:
-        APIError: 404 if the referenced contact does not exist.
+        APIError: 404 if no contact with ``contact_id`` is owned by the caller
+            (this includes the case where the contact exists for a different
+            user — we do not leak existence across tenants).
     """
     try:
         issued = await service.issue(
             contact_id=body.contact_id,
             channel=body.channel,
             destination=body.destination,
+            owner_id=identity.user_id,
         )
     except ContactNotFound as exc:
         raise APIError(

@@ -7,21 +7,23 @@ swappable in tests via ``app.dependency_overrides``.
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from typing import Annotated
 
-from fastapi import Depends, Request
+from fastapi import Depends, Header, HTTPException, Request, status
 
 from birthday_tracker.adapters import (
     FirestoreCollectionRequestRepository,
     FirestoreContactRepository,
+    FirestoreUserRepository,
     build_async_client,
 )
-from birthday_tracker.core.config import Settings
+from birthday_tracker.core.auth import Identity, dev_identity, verify_firebase_id_token
+from birthday_tracker.core.config import AppEnv, Settings
 from birthday_tracker.core.rate_limit import RateLimiter
 from birthday_tracker.services import (
     CollectionRequestRepository,
     ContactRepository,
+    UserRepository,
 )
 from birthday_tracker.services.collection_requests import CollectionRequestService
 
@@ -87,6 +89,26 @@ def get_collection_request_repository(
     return FirestoreCollectionRequestRepository(client=client)
 
 
+def get_user_repository(
+    request: Request,
+) -> UserRepository:
+    """Return the active :class:`UserRepository`.
+
+    Same in-memory-vs-Firestore pattern as the other repos.
+
+    Args:
+        request: Incoming request.
+
+    Returns:
+        A concrete :class:`UserRepository`.
+    """
+    if request.app.state.user_repo is not None:
+        return request.app.state.user_repo  # type: ignore[no-any-return]
+    settings: Settings = request.app.state.settings
+    client = build_async_client(project_id=settings.gcp_project_id)
+    return FirestoreUserRepository(client=client)
+
+
 def get_collection_request_service(
     settings: Annotated[Settings, Depends(get_app_settings)],
     contacts: Annotated[ContactRepository, Depends(get_contact_repository)],
@@ -128,24 +150,46 @@ def get_form_rate_limiter(request: Request) -> RateLimiter:
     return limiter
 
 
-# --- Auth placeholder -------------------------------------------------------
-# Real auth lands in issue #7 (GCP IAM / Identity-Aware Proxy). For now this
-# dependency exists so the route signature already declares it; swap the body
-# for a real check once auth is wired.
-
-OwnerIdentity = str
+# --- Authentication --------------------------------------------------------
 
 
-def require_owner() -> Callable[[], OwnerIdentity]:
-    """Return a dependency that yields the authenticated owner identity.
+def require_user(
+    settings: Annotated[Settings, Depends(get_app_settings)],
+    authorization: Annotated[str, Header()] = "",
+) -> Identity:
+    """Resolve the authenticated user for owner-side endpoints.
+
+    In ``APP_ENV=development`` the check is bypassed and a fixed dev
+    identity is returned, so the dashboard works without a real Firebase
+    project. In any other environment a valid Firebase ID token is
+    required in the ``Authorization: Bearer <token>`` header.
+
+    Args:
+        settings: Process settings (used to choose dev-bypass vs real verify).
+        authorization: ``Authorization`` header value, injected by FastAPI.
 
     Returns:
-        A callable usable with ``Depends(require_owner())``. Currently a
-        no-op stand-in; replace in issue #7.
+        The :class:`Identity` representing the caller.
+
+    Raises:
+        HTTPException: 401 when the token is absent, malformed, or fails
+            Firebase verification.
     """
+    if settings.app_env == AppEnv.development:
+        return dev_identity()
 
-    def _identity() -> OwnerIdentity:
-        # TODO(#7): replace with real auth check (IAP header / service account).
-        return "owner"
-
-    return _identity
+    if not authorization.lower().startswith("bearer "):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing Bearer token.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    token = authorization[len("bearer ") :]
+    try:
+        return verify_firebase_id_token(token)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=str(exc),
+            headers={"WWW-Authenticate": "Bearer"},
+        ) from exc

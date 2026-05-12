@@ -8,6 +8,7 @@ from birthday_tracker.services.notifiers import (
 from birthday_tracker.services.repositories import (
     CollectionRequestRepository,
     ContactRepository,
+    UserRepository,
 )
 
 __all__ = [
@@ -16,4 +17,5 @@ __all__ = [
     "EmailNotifier",
     "NotificationError",
     "SmsNotifier",
+    "UserRepository",
 ]

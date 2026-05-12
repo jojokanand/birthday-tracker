@@ -64,6 +64,46 @@ gcloud firestore databases create \
   --project "$PROJECT_ID"
 ```
 
+The backend uses three top-level collections — `contacts`, `collection_requests`,
+and `users` — keyed by UUID / Firebase uid. Owner-scoped queries on
+`contacts` filter by `owner_id`, which requires a single-field index that
+Firestore creates automatically on first write. No composite index is
+required for the current query shapes.
+
+---
+
+## 4a. Enable Firebase Auth
+
+The dashboard signs users in via Firebase Auth. Open the
+[Firebase console](https://console.firebase.google.com/), select the
+GCP project, then:
+
+1. **Authentication → Get started** to provision the Auth tenant.
+2. **Sign-in method → Add new provider → Google** (the only provider the
+   sign-in page wires up). Confirm the support email.
+3. **Project settings → Your apps → Add app → Web** to mint a web app
+   config. Copy the snippet — you'll paste the values into GitHub Actions
+   Variables below.
+
+The backend verifies tokens via the Admin SDK using Application Default
+Credentials, so no extra keys need to be deployed. The web SDK config
+values are not secrets (browsers ship them in client code); they only
+identify which Firebase project the SDK should talk to.
+
+Set five more GitHub Actions Variables (in addition to the ones from step
+8) so the deploy workflow bakes them into the frontend image:
+
+| Name | Source |
+|---|---|
+| `NEXT_PUBLIC_FIREBASE_API_KEY` | Firebase web config `apiKey` |
+| `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN` | Firebase web config `authDomain` |
+| `NEXT_PUBLIC_FIREBASE_PROJECT_ID` | Firebase web config `projectId` |
+| `NEXT_PUBLIC_FIREBASE_APP_ID` | Firebase web config `appId` |
+
+In `.github/workflows/deploy.yml` the build step needs to forward these
+as build args alongside `NEXT_PUBLIC_API_URL` (the existing wiring shows
+the pattern; extend it with the same `--build-arg` flags).
+
 ---
 
 ## 5. Create the deploy service account

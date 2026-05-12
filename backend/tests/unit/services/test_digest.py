@@ -16,6 +16,10 @@ from birthday_tracker.models import Contact
 from birthday_tracker.models.birthday import Birthday
 from birthday_tracker.services.digest import DigestService, _days_until, _render_html
 
+OWNER = "owner-a"
+OTHER = "owner-b"
+
+
 # ---------------------------------------------------------------------------
 # _days_until unit tests
 # ---------------------------------------------------------------------------
@@ -120,18 +124,20 @@ class TestGetUpcoming:
         today = dt.date(2024, 6, 15)
         contacts = [
             Contact(
+                owner_id=OWNER,
                 full_name="Soon",
                 email="soon@example.com",
                 birthday=Birthday(month=6, day=20),  # 5 days
             ),
             Contact(
+                owner_id=OWNER,
                 full_name="Later",
                 email="later@example.com",
                 birthday=Birthday(month=7, day=15),  # 30 days
             ),
         ]
         service = await _make_service(contacts)
-        results = await service.get_upcoming(days=14, today=today)
+        results = await service.get_upcoming(owner_id=OWNER, days=14, today=today)
         assert len(results) == 1
         assert results[0].full_name == "Soon"
         assert results[0].days_until == 5
@@ -139,9 +145,9 @@ class TestGetUpcoming:
     @pytest.mark.asyncio
     async def test_excludes_contacts_without_birthday(self) -> None:
         """Contacts with no birthday are excluded regardless of window."""
-        contacts = [Contact(full_name="No Birthday", email="nb@example.com")]
+        contacts = [Contact(owner_id=OWNER, full_name="No Birthday", email="nb@example.com")]
         service = await _make_service(contacts)
-        results = await service.get_upcoming(days=365, today=dt.date(2024, 6, 15))
+        results = await service.get_upcoming(owner_id=OWNER, days=365, today=dt.date(2024, 6, 15))
         assert results == []
 
     @pytest.mark.asyncio
@@ -150,18 +156,20 @@ class TestGetUpcoming:
         today = dt.date(2024, 6, 15)
         contacts = [
             Contact(
+                owner_id=OWNER,
                 full_name="B",
                 email="b@example.com",
                 birthday=Birthday(month=6, day=17),  # 2 days
             ),
             Contact(
+                owner_id=OWNER,
                 full_name="A",
                 email="a@example.com",
                 birthday=Birthday(month=6, day=16),  # 1 day
             ),
         ]
         service = await _make_service(contacts)
-        results = await service.get_upcoming(days=14, today=today)
+        results = await service.get_upcoming(owner_id=OWNER, days=14, today=today)
         assert [r.full_name for r in results] == ["A", "B"]
 
     @pytest.mark.asyncio
@@ -170,15 +178,38 @@ class TestGetUpcoming:
         today = dt.date(2024, 6, 15)
         contacts = [
             Contact(
+                owner_id=OWNER,
                 full_name="Today",
                 email="today@example.com",
                 birthday=Birthday(month=6, day=15),
             ),
         ]
         service = await _make_service(contacts)
-        results = await service.get_upcoming(days=0, today=today)
+        results = await service.get_upcoming(owner_id=OWNER, days=0, today=today)
         assert len(results) == 1
         assert results[0].days_until == 0
+
+    @pytest.mark.asyncio
+    async def test_only_returns_callers_contacts(self) -> None:
+        """Cross-tenant isolation: other owners' contacts are not returned."""
+        today = dt.date(2024, 6, 15)
+        contacts = [
+            Contact(
+                owner_id=OWNER,
+                full_name="Mine",
+                email="mine@example.com",
+                birthday=Birthday(month=6, day=17),
+            ),
+            Contact(
+                owner_id=OTHER,
+                full_name="Theirs",
+                email="theirs@example.com",
+                birthday=Birthday(month=6, day=17),
+            ),
+        ]
+        service = await _make_service(contacts)
+        results = await service.get_upcoming(owner_id=OWNER, days=14, today=today)
+        assert [r.full_name for r in results] == ["Mine"]
 
 
 # ---------------------------------------------------------------------------
@@ -196,6 +227,7 @@ class TestSendDigest:
         today = dt.date(2024, 6, 15)
         contacts = [
             Contact(
+                owner_id=OWNER,
                 full_name="Ada Lovelace",
                 email="ada@example.com",
                 birthday=Birthday(month=6, day=20),
@@ -206,7 +238,10 @@ class TestSendDigest:
         notifier.send = AsyncMock(return_value="msg-id-1")
 
         sent = await service.send_digest(
-            notifier=notifier, owner_email="owner@example.com", today=today
+            notifier=notifier,
+            owner_id=OWNER,
+            owner_email="owner@example.com",
+            today=today,
         )
 
         assert sent is True
@@ -216,23 +251,48 @@ class TestSendDigest:
         assert "digest" in call_kwargs["subject"].lower()
 
     @pytest.mark.asyncio
-    async def test_idempotent_second_call(self) -> None:
-        """A second call on the same date returns False without sending again."""
+    async def test_idempotent_second_call_per_owner(self) -> None:
+        """A second call for the same owner on the same date is a no-op."""
         today = dt.date(2024, 6, 15)
         service = await _make_service([])
         notifier = AsyncMock()
         notifier.send = AsyncMock(return_value="msg-id-1")
 
         first = await service.send_digest(
-            notifier=notifier, owner_email="owner@example.com", today=today
+            notifier=notifier,
+            owner_id=OWNER,
+            owner_email="owner@example.com",
+            today=today,
         )
         second = await service.send_digest(
-            notifier=notifier, owner_email="owner@example.com", today=today
+            notifier=notifier,
+            owner_id=OWNER,
+            owner_email="owner@example.com",
+            today=today,
         )
 
         assert first is True
         assert second is False
-        notifier.send.assert_awaited_once()  # only once, not twice
+        notifier.send.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_different_owners_dont_block_each_other(self) -> None:
+        """Per-owner idempotency: one user sending does not block another."""
+        today = dt.date(2024, 6, 15)
+        service = await _make_service([])
+        notifier = AsyncMock()
+        notifier.send = AsyncMock(return_value="msg-id")
+
+        a = await service.send_digest(
+            notifier=notifier, owner_id=OWNER, owner_email="a@example.com", today=today
+        )
+        b = await service.send_digest(
+            notifier=notifier, owner_id=OTHER, owner_email="b@example.com", today=today
+        )
+
+        assert a is True
+        assert b is True
+        assert notifier.send.await_count == 2
 
     @pytest.mark.asyncio
     async def test_different_day_sends_again(self) -> None:
@@ -242,10 +302,16 @@ class TestSendDigest:
         notifier.send = AsyncMock(return_value="msg-id")
 
         await service.send_digest(
-            notifier=notifier, owner_email="owner@example.com", today=dt.date(2024, 6, 15)
+            notifier=notifier,
+            owner_id=OWNER,
+            owner_email="owner@example.com",
+            today=dt.date(2024, 6, 15),
         )
         await service.send_digest(
-            notifier=notifier, owner_email="owner@example.com", today=dt.date(2024, 6, 16)
+            notifier=notifier,
+            owner_id=OWNER,
+            owner_email="owner@example.com",
+            today=dt.date(2024, 6, 16),
         )
 
         assert notifier.send.await_count == 2
@@ -259,7 +325,10 @@ class TestSendDigest:
         notifier.send = AsyncMock(return_value="msg-id")
 
         sent = await service.send_digest(
-            notifier=notifier, owner_email="owner@example.com", today=today
+            notifier=notifier,
+            owner_id=OWNER,
+            owner_email="owner@example.com",
+            today=today,
         )
 
         assert sent is True

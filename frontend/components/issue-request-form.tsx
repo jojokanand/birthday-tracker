@@ -14,7 +14,7 @@ import { ClipboardCopy, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { apiClient } from "@/lib/api";
+import { useApiClient } from "@/lib/api-client";
 import type { ContactResponse } from "@/lib/format";
 
 const schema = z.object({
@@ -46,10 +46,9 @@ export function IssueRequestForm({
   const [formUrl, setFormUrl] = React.useState<string | null>(null);
   const [copied, setCopied] = React.useState(false);
   const [serverError, setServerError] = React.useState<string | null>(null);
+  const api = useApiClient();
 
-  const selectedContact = contacts.find(
-    (c) => c.id === initialContactId,
-  );
+  const selectedContact = contacts.find((c) => c.id === initialContactId);
 
   const {
     register,
@@ -82,7 +81,7 @@ export function IssueRequestForm({
   async function onSubmit(values: FormValues) {
     setServerError(null);
     setFormUrl(null);
-    const { data, error } = await apiClient.POST("/collection-requests", {
+    const { data, error } = await api.POST("/collection-requests", {
       body: {
         contact_id: values.contact_id,
         channel: values.channel,

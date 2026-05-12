@@ -27,6 +27,10 @@ class CollectionRequest(BaseModel):
 
     Attributes:
         id: Stable identifier (UUID4) generated server-side.
+        owner_id: Firebase ``uid`` of the user who issued the request. Set
+            server-side from the authenticated identity; the form-submission
+            flow uses it to scope the resulting :class:`Contact` to the same
+            owner.
         contact_id: The :class:`~birthday_tracker.models.contact.Contact` this
             request is collecting info for.
         channel: Whether the link was sent via SMS or email.
@@ -42,6 +46,7 @@ class CollectionRequest(BaseModel):
     """
 
     id: UUID = Field(default_factory=uuid4)
+    owner_id: str = Field(min_length=1, max_length=128)
     contact_id: UUID
     channel: Channel
     destination: str = Field(min_length=1, max_length=320)

@@ -8,6 +8,7 @@ from birthday_tracker.models.collection_request import (
     CollectionRequest,
 )
 from birthday_tracker.models.contact import Contact
+from birthday_tracker.models.user import User
 
 __all__ = [
     "DEFAULT_TTL",
@@ -16,4 +17,5 @@ __all__ = [
     "Channel",
     "CollectionRequest",
     "Contact",
+    "User",
 ]

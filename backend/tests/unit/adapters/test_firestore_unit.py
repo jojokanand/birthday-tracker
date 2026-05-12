@@ -12,11 +12,11 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from birthday_tracker.adapters import FirestoreContactRepository
-from tests._contracts.contact_repository import make_contact
+from tests._contracts.contact_repository import OWNER, make_contact
 
 
-class _StreamingCollection:
-    """Async iterable yielding two mock snapshots — one with data, one with None."""
+class _StreamingQuery:
+    """Async iterable yielding mock snapshots."""
 
     def __init__(self, snapshots: list[Any]) -> None:
         self._snapshots = snapshots
@@ -29,8 +29,15 @@ class _StreamingCollection:
         return _gen()
 
 
+class _FilterableCollection(_StreamingQuery):
+    """Mock collection that also accepts ``.where(...)`` and returns itself."""
+
+    def where(self, filter: Any) -> _FilterableCollection:  # noqa: A002, ARG002
+        return self
+
+
 @pytest.mark.unit
-async def test_list_all_skips_snapshots_with_no_data() -> None:
+async def test_list_for_owner_skips_snapshots_with_no_data() -> None:
     """A snapshot whose ``to_dict()`` returns ``None`` is dropped silently.
 
     Firestore can theoretically yield a snapshot that has no underlying data
@@ -44,10 +51,10 @@ async def test_list_all_skips_snapshots_with_no_data() -> None:
     bad_snap.to_dict.return_value = None
 
     client = MagicMock()
-    client.collection.return_value = _StreamingCollection([good_snap, bad_snap])
+    client.collection.return_value = _FilterableCollection([good_snap, bad_snap])
 
     repo = FirestoreContactRepository(client=client, collection_name="any")
-    results = await repo.list_all()
+    results = await repo.list_for_owner(OWNER)
 
     assert len(results) == 1
     assert results[0].id == contact.id
@@ -66,4 +73,42 @@ async def test_get_returns_none_when_doc_missing() -> None:
     client.collection.return_value = collection
 
     repo = FirestoreContactRepository(client=client, collection_name="any")
-    assert await repo.get(make_contact().id) is None
+    assert await repo.get(make_contact().id, OWNER) is None
+
+
+@pytest.mark.unit
+async def test_get_returns_none_when_owner_mismatch() -> None:
+    """A document owned by a different user must look like absence."""
+    contact = make_contact(owner_id="someone-else")
+    snap = MagicMock()
+    snap.exists = True
+    snap.to_dict.return_value = contact.model_dump(mode="json")
+    doc_ref = MagicMock()
+    doc_ref.get = AsyncMock(return_value=snap)
+    collection = MagicMock()
+    collection.document.return_value = doc_ref
+    client = MagicMock()
+    client.collection.return_value = collection
+
+    repo = FirestoreContactRepository(client=client, collection_name="any")
+    assert await repo.get(contact.id, OWNER) is None
+
+
+@pytest.mark.unit
+async def test_delete_returns_false_when_owner_mismatch() -> None:
+    """Deleting another tenant's document must be a no-op."""
+    contact = make_contact(owner_id="someone-else")
+    snap = MagicMock()
+    snap.exists = True
+    snap.to_dict.return_value = contact.model_dump(mode="json")
+    doc_ref = MagicMock()
+    doc_ref.get = AsyncMock(return_value=snap)
+    doc_ref.delete = AsyncMock()
+    collection = MagicMock()
+    collection.document.return_value = doc_ref
+    client = MagicMock()
+    client.collection.return_value = collection
+
+    repo = FirestoreContactRepository(client=client, collection_name="any")
+    assert await repo.delete(contact.id, OWNER) is False
+    doc_ref.delete.assert_not_awaited()

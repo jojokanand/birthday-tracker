@@ -23,6 +23,8 @@ from birthday_tracker.services.collection_requests import (
 )
 
 SECRET = "unit-test-secret"
+OWNER = "owner-a"
+OTHER = "owner-b"
 
 
 def _service(
@@ -47,6 +49,10 @@ def _submission() -> FormSubmission:
         address=Address(street1="1 Main", city="London", country="GB"),
         birthday=Birthday(month=12, day=10, year=1990),
     )
+
+
+def _contact(*, owner: str = OWNER, full_name: str = "placeholder") -> Contact:
+    return Contact(owner_id=owner, full_name=full_name, email="ada@example.com")
 
 
 @pytest.mark.unit
@@ -77,7 +83,7 @@ async def test_constructor_rejects_non_positive_ttl() -> None:
 async def test_issue_persists_request_and_returns_url() -> None:
     contacts = InMemoryContactRepository()
     requests = InMemoryCollectionRequestRepository()
-    contact = Contact(full_name="Ada", email="ada@example.com")
+    contact = _contact()
     await contacts.save(contact)
     svc = _service(contacts=contacts, requests=requests)
 
@@ -85,12 +91,14 @@ async def test_issue_persists_request_and_returns_url() -> None:
         contact_id=contact.id,
         channel=Channel.email,
         destination="ada@example.com",
+        owner_id=OWNER,
     )
 
     assert issued.url.startswith("https://example.test/form/")
     assert issued.url.endswith(issued.token)
     assert issued.request.contact_id == contact.id
-    persisted = await requests.get(issued.request.id)
+    assert issued.request.owner_id == OWNER
+    persisted = await requests.get(issued.request.id, OWNER)
     assert persisted is not None
     assert persisted.token_hash == issued.request.token_hash
 
@@ -98,12 +106,15 @@ async def test_issue_persists_request_and_returns_url() -> None:
 @pytest.mark.unit
 async def test_issue_strips_trailing_slash_from_base_url() -> None:
     contacts = InMemoryContactRepository()
-    contact = Contact(full_name="Ada", email="ada@example.com")
+    contact = _contact()
     await contacts.save(contact)
     svc = _service(contacts=contacts)
 
     issued = await svc.issue(
-        contact_id=contact.id, channel=Channel.email, destination="ada@example.com"
+        contact_id=contact.id,
+        channel=Channel.email,
+        destination="ada@example.com",
+        owner_id=OWNER,
     )
     assert "//form/" not in issued.url
 
@@ -112,18 +123,43 @@ async def test_issue_strips_trailing_slash_from_base_url() -> None:
 async def test_issue_raises_when_contact_missing() -> None:
     svc = _service()
     with pytest.raises(ContactNotFound):
-        await svc.issue(contact_id=uuid4(), channel=Channel.email, destination="x@y.com")
+        await svc.issue(
+            contact_id=uuid4(),
+            channel=Channel.email,
+            destination="x@y.com",
+            owner_id=OWNER,
+        )
+
+
+@pytest.mark.unit
+async def test_issue_rejects_contact_owned_by_someone_else() -> None:
+    """A user cannot issue a request for another user's contact."""
+    contacts = InMemoryContactRepository()
+    contact = _contact(owner=OTHER)
+    await contacts.save(contact)
+    svc = _service(contacts=contacts)
+
+    with pytest.raises(ContactNotFound):
+        await svc.issue(
+            contact_id=contact.id,
+            channel=Channel.email,
+            destination="x@y.com",
+            owner_id=OWNER,
+        )
 
 
 @pytest.mark.unit
 async def test_lookup_returns_pending_request() -> None:
     contacts = InMemoryContactRepository()
     requests = InMemoryCollectionRequestRepository()
-    contact = Contact(full_name="Ada", email="ada@example.com")
+    contact = _contact()
     await contacts.save(contact)
     svc = _service(contacts=contacts, requests=requests)
     issued = await svc.issue(
-        contact_id=contact.id, channel=Channel.email, destination="ada@example.com"
+        contact_id=contact.id,
+        channel=Channel.email,
+        destination="ada@example.com",
+        owner_id=OWNER,
     )
 
     request = await svc.lookup(issued.token)
@@ -142,11 +178,14 @@ async def test_lookup_raises_token_invalid_for_unknown_token() -> None:
 async def test_lookup_raises_token_expired() -> None:
     contacts = InMemoryContactRepository()
     requests = InMemoryCollectionRequestRepository()
-    contact = Contact(full_name="Ada", email="ada@example.com")
+    contact = _contact()
     await contacts.save(contact)
     svc = _service(contacts=contacts, requests=requests, ttl=1)
     issued = await svc.issue(
-        contact_id=contact.id, channel=Channel.email, destination="ada@example.com"
+        contact_id=contact.id,
+        channel=Channel.email,
+        destination="ada@example.com",
+        owner_id=OWNER,
     )
     import time
 
@@ -159,11 +198,14 @@ async def test_lookup_raises_token_expired() -> None:
 async def test_lookup_raises_when_request_already_fulfilled() -> None:
     contacts = InMemoryContactRepository()
     requests = InMemoryCollectionRequestRepository()
-    contact = Contact(full_name="Ada", email="ada@example.com")
+    contact = _contact()
     await contacts.save(contact)
     svc = _service(contacts=contacts, requests=requests)
     issued = await svc.issue(
-        contact_id=contact.id, channel=Channel.email, destination="ada@example.com"
+        contact_id=contact.id,
+        channel=Channel.email,
+        destination="ada@example.com",
+        owner_id=OWNER,
     )
 
     await svc.fulfill(token=issued.token, submission=_submission())
@@ -175,20 +217,24 @@ async def test_lookup_raises_when_request_already_fulfilled() -> None:
 async def test_fulfill_updates_contact_and_marks_request_fulfilled() -> None:
     contacts = InMemoryContactRepository()
     requests = InMemoryCollectionRequestRepository()
-    contact = Contact(full_name="placeholder", email="ada@example.com")
+    contact = _contact()
     await contacts.save(contact)
     svc = _service(contacts=contacts, requests=requests)
     issued = await svc.issue(
-        contact_id=contact.id, channel=Channel.email, destination="ada@example.com"
+        contact_id=contact.id,
+        channel=Channel.email,
+        destination="ada@example.com",
+        owner_id=OWNER,
     )
 
     updated = await svc.fulfill(token=issued.token, submission=_submission())
     assert updated.full_name == "Ada Lovelace"
     assert updated.preferred_name == "Ada"
+    assert updated.owner_id == OWNER  # ownership preserved through update
     assert updated.birthday is not None and updated.birthday.year == 1990
-    fresh_contact = await contacts.get(contact.id)
+    fresh_contact = await contacts.get(contact.id, OWNER)
     assert fresh_contact is not None and fresh_contact.full_name == "Ada Lovelace"
-    persisted = await requests.get(issued.request.id)
+    persisted = await requests.get(issued.request.id, OWNER)
     assert persisted is not None and persisted.fulfilled_at is not None
 
 
@@ -196,13 +242,16 @@ async def test_fulfill_updates_contact_and_marks_request_fulfilled() -> None:
 async def test_fulfill_raises_when_contact_deleted_after_issue() -> None:
     contacts = InMemoryContactRepository()
     requests = InMemoryCollectionRequestRepository()
-    contact = Contact(full_name="Ada", email="ada@example.com")
+    contact = _contact()
     await contacts.save(contact)
     svc = _service(contacts=contacts, requests=requests)
     issued = await svc.issue(
-        contact_id=contact.id, channel=Channel.email, destination="ada@example.com"
+        contact_id=contact.id,
+        channel=Channel.email,
+        destination="ada@example.com",
+        owner_id=OWNER,
     )
 
-    await contacts.delete(contact.id)
+    await contacts.delete(contact.id, OWNER)
     with pytest.raises(ContactNotFound):
         await svc.fulfill(token=issued.token, submission=_submission())

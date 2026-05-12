@@ -1,11 +1,15 @@
 /**
- * Contacts list page — shows all stored contacts with add/delete actions.
+ * Contacts list page — shows the caller's contacts with add/delete actions.
  *
  * @module
  */
 
+"use client";
+
+import * as React from "react";
 import Link from "next/link";
 import { Users } from "lucide-react";
+import { AuthGuard } from "@/components/auth-guard";
 import {
   Card,
   CardContent,
@@ -22,29 +26,52 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { CreateContactDialog } from "@/components/create-contact-dialog";
-import { apiClient } from "@/lib/api";
+import { useApiClient } from "@/lib/api-client";
+import { useAuth } from "@/lib/auth-context";
 import { formatBirthday, type ContactResponse } from "@/lib/format";
-
-/** Always render at request time — this page reads live backend data. */
-export const dynamic = "force-dynamic";
-
-async function fetchContacts(): Promise<ContactResponse[]> {
-  const { data, error } = await apiClient.GET("/contacts", {
-    fetch: (input: RequestInfo | URL, init?: RequestInit) =>
-      fetch(input, { ...init, cache: "no-store" }),
-  });
-  if (error) return [];
-  return data ?? [];
-}
 
 /**
  * Contacts list page.
  *
- * Server-renders the full contact list; the add-contact dialog and delete
- * actions are Client Components embedded within.
+ * Fetches the caller's contacts client-side using the signed-in user's
+ * ID token. The "Add contact" dialog refetches on success.
  */
-export default async function ContactsPage() {
-  const contacts = await fetchContacts();
+export default function ContactsPage() {
+  return (
+    <AuthGuard>
+      <ContactsContent />
+    </AuthGuard>
+  );
+}
+
+function ContactsContent() {
+  const api = useApiClient();
+  const { isAuthed } = useAuth();
+  const [contacts, setContacts] = React.useState<ContactResponse[]>([]);
+  const [loading, setLoading] = React.useState(true);
+  const [refreshKey, setRefreshKey] = React.useState(0);
+
+  React.useEffect(() => {
+    if (!isAuthed) return;
+    let alive = true;
+    (async () => {
+      const { data, error } = await api.GET("/contacts", {});
+      if (!alive) return;
+      setContacts(error ? [] : (data ?? []));
+      setLoading(false);
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [api, isAuthed, refreshKey]);
+
+  const onCreated = React.useCallback(() => {
+    setRefreshKey((k) => k + 1);
+  }, []);
+
+  if (loading) {
+    return <div className="text-sm text-muted-foreground">Loading…</div>;
+  }
 
   return (
     <div className="space-y-6">
@@ -55,7 +82,7 @@ export default async function ContactsPage() {
             {contacts.length} contact{contacts.length !== 1 ? "s" : ""} stored.
           </p>
         </div>
-        <CreateContactDialog />
+        <CreateContactDialog onCreated={onCreated} />
       </div>
 
       {contacts.length === 0 ? (
@@ -100,9 +127,7 @@ export default async function ContactsPage() {
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground">
                       <div>{c.email ?? "—"}</div>
-                      {c.phone && (
-                        <div className="text-xs">{c.phone}</div>
-                      )}
+                      {c.phone && <div className="text-xs">{c.phone}</div>}
                     </TableCell>
                     <TableCell>{formatBirthday(c.birthday)}</TableCell>
                     <TableCell className="text-sm text-muted-foreground">

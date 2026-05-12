@@ -1,8 +1,13 @@
 """Unit tests for the contacts CRUD router.
 
 The repository layer is replaced by :class:`InMemoryContactRepository` so
-tests never touch Firestore.  They verify HTTP semantics — status codes,
+tests never touch Firestore. They verify HTTP semantics — status codes,
 response shapes, sorting, filtering — not business logic.
+
+Auth uses :class:`~birthday_tracker.core.auth.Identity`; tests run with
+``APP_ENV=development`` so :func:`require_user` returns the fixed dev
+identity (``dev-user``). Cross-tenant tests override the dependency to
+simulate another user.
 """
 
 from __future__ import annotations
@@ -15,23 +20,39 @@ from fastapi.testclient import TestClient
 
 from birthday_tracker.adapters import InMemoryContactRepository
 from birthday_tracker.api.contacts import _days_until_birthday
-from birthday_tracker.api.dependencies import get_contact_repository
+from birthday_tracker.api.dependencies import get_contact_repository, require_user
+from birthday_tracker.core.auth import Identity
 from birthday_tracker.core.config import AppEnv, Settings
 from birthday_tracker.core.config import get_settings as get_settings_dep
 from birthday_tracker.main import create_app
 from birthday_tracker.models import Contact
 from birthday_tracker.models.birthday import Birthday
 
+DEV_OWNER = "dev-user"  # matches Identity from core.auth.dev_identity()
+OTHER_OWNER = "another-user"
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 
-def _build_client(repo: InMemoryContactRepository) -> TestClient:
-    """Return a :class:`TestClient` with *repo* injected as the contact repository."""
+def _build_client(
+    repo: InMemoryContactRepository,
+    *,
+    identity: Identity | None = None,
+) -> TestClient:
+    """Return a :class:`TestClient` with *repo* injected as the contact repository.
+
+    Args:
+        repo: Repository to wire into the app.
+        identity: Override the authenticated user. When ``None``, dev-mode
+            auth bypass yields the fixed dev identity.
+    """
     get_settings_dep.cache_clear()
     app = create_app(settings=Settings(app_env=AppEnv.development, log_level="ERROR"))
     app.dependency_overrides[get_contact_repository] = lambda: repo
+    if identity is not None:
+        app.dependency_overrides[require_user] = lambda: identity
     return TestClient(app)
 
 
@@ -42,9 +63,11 @@ async def _seed(
     preferred_name: str | None = None,
     phone: str | None = None,
     birthday: Birthday | None = None,
+    owner_id: str = DEV_OWNER,
 ) -> Contact:
     """Persist and return a :class:`Contact` with sensible defaults."""
     contact = Contact(
+        owner_id=owner_id,
         full_name=full_name,
         email=email,
         preferred_name=preferred_name,
@@ -151,6 +174,8 @@ async def test_list_response_shape() -> None:
         "days_until_birthday",
     ):
         assert key in body, f"missing key: {key}"
+    # owner_id is intentionally NOT exposed on the wire
+    assert "owner_id" not in body
 
 
 @pytest.mark.unit
@@ -234,6 +259,23 @@ async def test_create_returns_201() -> None:
     assert body["full_name"] == "Ada Lovelace"
     assert body["email"] == "ada@example.com"
     assert "id" in body
+
+
+@pytest.mark.unit
+async def test_create_assigns_caller_as_owner() -> None:
+    """POST sets ``owner_id`` from the authenticated identity, not the body."""
+    repo = InMemoryContactRepository()
+    client = _build_client(repo)
+
+    resp = client.post(
+        "/contacts",
+        json={"full_name": "Ada", "email": "ada@example.com", "owner_id": "spoof"},
+    )
+    assert resp.status_code == 201
+    # Walk the repo directly to confirm the stored owner is the caller.
+    stored = await repo.list_for_owner(DEV_OWNER)
+    assert len(stored) == 1
+    assert stored[0].owner_id == DEV_OWNER  # not "spoof"
 
 
 @pytest.mark.unit
@@ -394,3 +436,74 @@ def test_delete_returns_404_for_unknown_id() -> None:
 
     assert resp.status_code == 404
     assert resp.json()["title"] == "Contact not found"
+
+
+# ---------------------------------------------------------------------------
+# Cross-tenant isolation
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+async def test_list_omits_other_users_contacts() -> None:
+    """User A's GET /contacts does not include User B's contacts."""
+    repo = InMemoryContactRepository()
+    await _seed(repo, full_name="Mine", email="m@example.com", owner_id=DEV_OWNER)
+    await _seed(repo, full_name="Theirs", email="t@example.com", owner_id=OTHER_OWNER)
+
+    client = _build_client(repo)  # default dev identity
+    resp = client.get("/contacts")
+    names = [c["full_name"] for c in resp.json()]
+    assert names == ["Mine"]
+
+
+@pytest.mark.unit
+async def test_get_returns_404_for_other_users_contact() -> None:
+    """A 404 (not 403) for another user's contact — no existence leak."""
+    repo = InMemoryContactRepository()
+    theirs = await _seed(repo, full_name="Theirs", email="t@example.com", owner_id=OTHER_OWNER)
+
+    client = _build_client(repo)
+    resp = client.get(f"/contacts/{theirs.id}")
+    assert resp.status_code == 404
+
+
+@pytest.mark.unit
+async def test_update_returns_404_for_other_users_contact() -> None:
+    """PUT on someone else's contact must look like absence."""
+    repo = InMemoryContactRepository()
+    theirs = await _seed(repo, full_name="Theirs", email="t@example.com", owner_id=OTHER_OWNER)
+
+    client = _build_client(repo)
+    resp = client.put(f"/contacts/{theirs.id}", json={"full_name": "Hacked"})
+    assert resp.status_code == 404
+
+    # And the original record is untouched.
+    fresh = await repo.list_for_owner(OTHER_OWNER)
+    assert fresh[0].full_name == "Theirs"
+
+
+@pytest.mark.unit
+async def test_delete_returns_404_for_other_users_contact() -> None:
+    """DELETE on someone else's contact must be a no-op + 404."""
+    repo = InMemoryContactRepository()
+    theirs = await _seed(repo, full_name="Theirs", email="t@example.com", owner_id=OTHER_OWNER)
+
+    client = _build_client(repo)
+    resp = client.delete(f"/contacts/{theirs.id}")
+    assert resp.status_code == 404
+    # Their record still there.
+    assert await repo.list_for_owner(OTHER_OWNER) != []
+
+
+@pytest.mark.unit
+async def test_two_users_can_have_identical_contact_details() -> None:
+    """User A and User B can each create the same email/phone/name without conflict."""
+    repo = InMemoryContactRepository()
+    client_a = _build_client(repo)  # dev identity (DEV_OWNER)
+    client_b = _build_client(repo, identity=Identity(user_id=OTHER_OWNER, email="b@example.com"))
+
+    a = client_a.post("/contacts", json={"full_name": "Abc", "email": "abc@example.com"})
+    b = client_b.post("/contacts", json={"full_name": "Abc", "email": "abc@example.com"})
+    assert a.status_code == 201
+    assert b.status_code == 201
+    assert a.json()["id"] != b.json()["id"]
