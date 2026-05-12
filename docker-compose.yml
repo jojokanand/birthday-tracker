@@ -1,0 +1,40 @@
+# Local full-stack environment for development and E2E testing.
+#
+# Usage (Linux — network_mode: host makes localhost resolve correctly for both
+# server-side Next.js fetches and in-browser client fetches):
+#
+#   docker compose up --build
+#
+# Then open http://localhost:3000 in your browser.
+#
+# macOS: Docker Desktop does not support network_mode: host.  Use direct
+# process startup instead (see e2e.yml for reference):
+#
+#   cd backend && uv run uvicorn birthday_tracker.main:app --port 8000 &
+#   cd frontend && NEXT_PUBLIC_API_URL=http://localhost:8000 npm run dev
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: infra/Dockerfile.backend
+    network_mode: host
+    environment:
+      APP_ENV: development
+      LOG_LEVEL: INFO
+      # FORM_TOKEN_SECRET is required for signing form links.
+      # Generate with: python3 -c "import secrets; print(secrets.token_hex(32))"
+      FORM_TOKEN_SECRET: ${FORM_TOKEN_SECRET:-change-me-for-local-dev}
+      PUBLIC_BASE_URL: http://localhost:3000
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: ../infra/Dockerfile.frontend
+      args:
+        # Baked into the Next.js client bundle at image build time.
+        # Must be reachable from the browser (localhost:8000 via host network).
+        NEXT_PUBLIC_API_URL: http://localhost:8000
+    network_mode: host
+    depends_on:
+      - backend

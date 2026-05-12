@@ -8,10 +8,11 @@ so they never depend on a module-level singleton.
 from __future__ import annotations
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from birthday_tracker import __version__
 from birthday_tracker.api import collection_requests, contacts, digest, errors, form, health, ready
-from birthday_tracker.core.config import Settings, get_settings
+from birthday_tracker.core.config import AppEnv, Settings, get_settings
 from birthday_tracker.core.logging import configure_logging, get_logger
 from birthday_tracker.core.rate_limit import RateLimiter
 
@@ -49,6 +50,35 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.form_rate_limiter = RateLimiter(
         max_per_window=settings.form_rate_limit_per_minute,
         window_seconds=60.0,
+    )
+
+    # In development mode, use in-memory repositories so the server starts
+    # without GCP credentials.  The same instances are shared across all
+    # requests, giving request-level persistence for local testing and E2E.
+    if settings.app_env == AppEnv.development:
+        from birthday_tracker.adapters import (  # noqa: PLC0415
+            InMemoryCollectionRequestRepository,
+            InMemoryContactRepository,
+        )
+        app.state.contact_repo = InMemoryContactRepository()
+        app.state.collection_request_repo = InMemoryCollectionRequestRepository()
+    else:
+        app.state.contact_repo = None
+        app.state.collection_request_repo = None
+
+    # Allow the frontend to make cross-origin requests from the browser.
+    # In development/staging any origin is permitted; in production only the
+    # dashboard origin is allowed so browsers enforce the restriction.
+    cors_origins = (
+        ["*"]
+        if settings.app_env != AppEnv.production
+        else [settings.public_base_url]
+    )
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=cors_origins,
+        allow_methods=["*"],
+        allow_headers=["*"],
     )
 
     errors.install_error_handlers(app)
