@@ -234,6 +234,7 @@ Digest service
 .. autoclass:: birthday_tracker.services.digest.UpcomingBirthday
    :members:
    :show-inheritance:
+   :no-index:
 
 .. autofunction:: birthday_tracker.services.digest._days_until
 
