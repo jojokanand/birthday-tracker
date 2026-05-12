@@ -1,0 +1,20 @@
+name: frontend-ci
+
+# Placeholder workflow. The real frontend lands in issue #6 — at that point this
+# job will install Node, run lint/typecheck/test/build for the Next.js app.
+on:
+  pull_request:
+    paths:
+      - "frontend/**"
+      - ".github/workflows/ci-frontend.yml"
+  push:
+    branches: [main]
+    paths:
+      - "frontend/**"
+      - ".github/workflows/ci-frontend.yml"
+
+jobs:
+  noop:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Frontend CI is a no-op until issue #6 scaffolds the Next.js app."
