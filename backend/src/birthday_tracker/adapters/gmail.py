@@ -122,7 +122,13 @@ def build_gmail_service(credentials: Credentials) -> Any:
     return build("gmail", "v1", credentials=credentials, cache_discovery=False)
 
 
-def _encode_email(from_addr: str, to: str, subject: str, html: str) -> dict[str, str]:
+def _encode_email(
+    from_addr: str,
+    to: str,
+    subject: str,
+    html: str,
+    text: str | None = None,
+) -> dict[str, str]:
     """Build a base64url-encoded MIME message ready for the Gmail API.
 
     Args:
@@ -130,6 +136,11 @@ def _encode_email(from_addr: str, to: str, subject: str, html: str) -> dict[str,
         to: Recipient address.
         subject: Subject line (no newlines).
         html: HTML body.
+        text: Plain-text alternative shipped alongside the HTML. When
+            ``None``, a generic placeholder is used; pass real text
+            whenever the message has meaningful content (links,
+            instructions, etc.) so plain-text-only clients aren't
+            stranded.
 
     Returns:
         ``{"raw": ...}`` payload accepted by ``users().messages().send``.
@@ -138,7 +149,7 @@ def _encode_email(from_addr: str, to: str, subject: str, html: str) -> dict[str,
     message["From"] = from_addr
     message["To"] = to
     message["Subject"] = subject
-    message.set_content("This message contains HTML; please use an HTML-capable client.")
+    message.set_content(text or "This message contains HTML; please use an HTML-capable client.")
     message.add_alternative(html, subtype="html")
 
     encoded = base64.urlsafe_b64encode(message.as_bytes()).decode("ascii")
@@ -169,13 +180,22 @@ class GmailNotifier:
         self.service = service
         self.from_address = from_address
 
-    async def send(self, to: str, subject: str, html: str) -> str:
-        """Send an HTML email via Gmail.
+    async def send(
+        self,
+        to: str,
+        subject: str,
+        html: str,
+        text: str | None = None,
+    ) -> str:
+        """Send an HTML email via Gmail with an optional plain-text alternative.
 
         Args:
             to: Recipient email address.
             subject: Subject line.
             html: HTML body.
+            text: Plain-text alternative shipped alongside the HTML for
+                clients that strip markup. When ``None``, a generic
+                placeholder is used.
 
         Returns:
             The Gmail message ID assigned by the API.
@@ -183,7 +203,7 @@ class GmailNotifier:
         Raises:
             NotificationError: Wraps any exception raised by the Gmail API.
         """
-        payload = _encode_email(self.from_address, to, subject, html)
+        payload = _encode_email(self.from_address, to, subject, html, text=text)
         try:
             sent = await asyncio.to_thread(
                 lambda: self.service.users().messages().send(userId="me", body=payload).execute(),
