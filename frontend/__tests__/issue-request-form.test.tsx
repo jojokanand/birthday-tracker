@@ -163,12 +163,22 @@ describe("IssueRequestForm", () => {
     expect(screen.getByText(FORM_URL)).toBeInTheDocument();
   });
 
-  it("relabels the Send button when the channel switches to SMS", () => {
+  it("hides the Send button and shows a muted notice when SMS is selected", () => {
+    // Charles has a phone, no email — channel defaults to sms.
     render(
       <IssueRequestForm contacts={CONTACTS} initialContactId={CHARLES_ID} />,
     );
+    // The channel-aware Send button is gone…
     expect(
-      screen.getByRole("button", { name: /send via sms/i }),
+      screen.queryByRole("button", { name: /send via sms/i }),
+    ).not.toBeInTheDocument();
+    // …and the user is told to use Generate instead.
+    expect(
+      screen.getByText(/sms sending is temporarily disabled/i),
+    ).toBeInTheDocument();
+    // Generate is still available.
+    expect(
+      screen.getByRole("button", { name: /generate form link/i }),
     ).toBeInTheDocument();
   });
 
@@ -186,17 +196,17 @@ describe("IssueRequestForm", () => {
   it("surfaces the 503 detail when the notifier isn't configured", async () => {
     mockPost.mockResolvedValue({
       data: undefined,
-      error: { detail: "SMS delivery is not configured for this server." },
+      error: { detail: "Email delivery is not configured for this server." },
       response: { status: 503 },
     });
 
-    render(<IssueRequestForm contacts={CONTACTS} initialContactId={CHARLES_ID} />);
-    // Charles has a phone, no email — channel defaults to sms.
-    fireEvent.click(screen.getByRole("button", { name: /send via sms/i }));
+    const { container } = render(<IssueRequestForm contacts={CONTACTS} />);
+    selectAdaWithEmail(container);
+    fireEvent.click(screen.getByRole("button", { name: /send via email/i }));
 
     await waitFor(() =>
       expect(
-        screen.getByText(/sms delivery is not configured/i),
+        screen.getByText(/email delivery is not configured/i),
       ).toBeInTheDocument(),
     );
   });
