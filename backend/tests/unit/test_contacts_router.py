@@ -304,9 +304,7 @@ async def test_list_last_page_has_no_next_cursor() -> None:
 
     client = _build_client(repo)
     first = client.get("/contacts", params={"limit": 10}).json()
-    second = client.get(
-        "/contacts", params={"limit": 10, "cursor": first["next_cursor"]}
-    ).json()
+    second = client.get("/contacts", params={"limit": 10, "cursor": first["next_cursor"]}).json()
 
     assert len(second["items"]) == 5
     assert second["next_cursor"] is None
@@ -366,9 +364,7 @@ async def test_list_upcoming_with_cursor_paginates() -> None:
         )
 
     client = _build_client(repo)
-    first = client.get(
-        "/contacts", params={"upcoming_in_days": 30, "limit": 10}
-    ).json()
+    first = client.get("/contacts", params={"upcoming_in_days": 30, "limit": 10}).json()
     assert len(first["items"]) == 10
     assert first["total"] == 12
     assert first["next_cursor"] is not None
