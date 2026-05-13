@@ -66,31 +66,40 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List all contacts (owner only)
-         * @description Return all contacts, optionally filtered to upcoming birthdays.
+         * List the caller's contacts (paginated)
+         * @description Return one page of the authenticated user's contacts.
          *
          *     Args:
          *         repo: Injected :class:`ContactRepository`.
-         *         _owner: Authenticated owner identity (stub).
+         *         identity: Authenticated caller — scopes the listing to their data.
          *         upcoming_in_days: Optional filter: only contacts with a birthday
          *             within the next ``upcoming_in_days`` calendar days are returned.
          *             Contacts without a birthday are omitted when this filter is active.
+         *         limit: Page size; defaults to 10, capped at 100.
+         *         cursor: Opaque cursor returned by a previous request; resume after
+         *             the contact with that ``id`` in the route's sort order.
          *
          *     Returns:
-         *         List of :class:`ContactResponse` objects, ordered by
-         *         ``days_until_birthday`` when ``upcoming_in_days`` is set, otherwise
-         *         by ascending ``full_name``.
+         *         A :class:`ContactsPage` with the page items, the next cursor (or
+         *         ``None`` if exhausted), and the total count of items matching the
+         *         current filter (used by the UI for ``Page X of Y``).
+         *
+         *     Raises:
+         *         APIError: 400 when ``cursor`` does not refer to any item in the
+         *             current filtered set — the client likely raced a delete or
+         *             sent a stale URL; treat this as a recoverable error and reset
+         *             paging.
          */
         get: operations["list_contacts_contacts_get"];
         put?: never;
         /**
-         * Create a new contact (owner only)
-         * @description Persist a new contact and return the saved record.
+         * Create a new contact
+         * @description Persist a new contact owned by the authenticated user.
          *
          *     Args:
-         *         body: Contact creation payload.
+         *         body: Contact creation payload (must not include ``owner_id``).
          *         repo: Injected :class:`ContactRepository`.
-         *         _owner: Authenticated owner identity (stub).
+         *         identity: Authenticated caller — assigned as the contact's owner.
          *
          *     Returns:
          *         The newly created :class:`ContactResponse`.
@@ -114,53 +123,56 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Fetch a single contact (owner only)
-         * @description Return the contact with the given ID.
+         * Fetch a single contact
+         * @description Return the contact with the given ID if owned by the caller.
          *
          *     Args:
          *         contact_id: UUID of the contact to fetch.
          *         repo: Injected :class:`ContactRepository`.
-         *         _owner: Authenticated owner identity (stub).
+         *         identity: Authenticated caller.
          *
          *     Returns:
          *         The :class:`ContactResponse` for the matching contact.
          *
          *     Raises:
-         *         APIError: 404 if no contact with ``contact_id`` exists.
+         *         APIError: 404 if no contact with ``contact_id`` exists *for this
+         *             owner* — a wrong-owner mismatch is indistinguishable from
+         *             absence on purpose, so callers cannot probe for cross-tenant
+         *             existence.
          */
         get: operations["get_contact_contacts__contact_id__get"];
         /**
-         * Update a contact (owner only)
-         * @description Apply a partial update to an existing contact.
+         * Update a contact
+         * @description Apply a partial update to one of the caller's contacts.
          *
          *     Only fields explicitly included in ``body`` are changed; omitted fields
-         *     retain their current values.
+         *     retain their current values. ``owner_id`` cannot be modified.
          *
          *     Args:
          *         contact_id: UUID of the contact to update.
          *         body: Partial update payload.
          *         repo: Injected :class:`ContactRepository`.
-         *         _owner: Authenticated owner identity (stub).
+         *         identity: Authenticated caller — must own the contact.
          *
          *     Returns:
          *         The updated :class:`ContactResponse`.
          *
          *     Raises:
-         *         APIError: 404 if no contact with ``contact_id`` exists.
+         *         APIError: 404 if no contact with ``contact_id`` is owned by the caller.
          */
         put: operations["update_contact_contacts__contact_id__put"];
         post?: never;
         /**
-         * Delete a contact (owner only)
-         * @description Remove a contact permanently.
+         * Delete a contact
+         * @description Remove one of the caller's contacts permanently.
          *
          *     Args:
          *         contact_id: UUID of the contact to delete.
          *         repo: Injected :class:`ContactRepository`.
-         *         _owner: Authenticated owner identity (stub).
+         *         identity: Authenticated caller.
          *
          *     Raises:
-         *         APIError: 404 if no contact with ``contact_id`` exists.
+         *         APIError: 404 if no contact with ``contact_id`` is owned by the caller.
          */
         delete: operations["delete_contact_contacts__contact_id__delete"];
         options?: never;
@@ -178,19 +190,21 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Issue a new collection request (owner only)
-         * @description Mint a token and persist a pending collection request.
+         * Issue a new collection request
+         * @description Mint a token and persist a pending collection request for the caller.
          *
          *     Args:
          *         body: Request payload with ``contact_id``, ``channel``, ``destination``.
          *         service: Injected :class:`CollectionRequestService`.
-         *         _owner: Authenticated owner identity (stub — real auth in issue #7).
+         *         identity: Authenticated caller — must own the referenced contact.
          *
          *     Returns:
          *         :class:`IssuedRequestResponse` carrying the public form URL.
          *
          *     Raises:
-         *         APIError: 404 if the referenced contact does not exist.
+         *         APIError: 404 if no contact with ``contact_id`` is owned by the caller
+         *             (this includes the case where the contact exists for a different
+         *             user — we do not leak existence across tenants).
          */
         post: operations["issue_collection_request_collection_requests_post"];
         delete?: never;
@@ -239,6 +253,115 @@ export interface paths {
          *             if rate-limited.
          */
         post: operations["submit_form_form__token__post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/internal/digest/upcoming": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List one owner's upcoming birthdays (admin debug)
+         * @description Return the upcoming birthdays for a specific owner.
+         *
+         *     Intended for debugging and Cloud Scheduler health-check probes.
+         *     Protected by OIDC validation when configured; otherwise wide-open in
+         *     development.
+         *
+         *     Args:
+         *         _auth: Resolved OIDC auth dependency (side-effect only).
+         *         repo: Injected contact repository.
+         *         owner_id: Firebase ``uid`` whose contacts to load.
+         *         days: Look-ahead window.
+         *
+         *     Returns:
+         *         Sorted list of upcoming birthdays for the requested owner.
+         */
+        get: operations["get_upcoming_birthdays_internal_digest_upcoming_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/internal/digest/send": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send the daily digest email to every user
+         * @description Iterate every user profile and send each their own daily digest.
+         *
+         *     Cloud Scheduler should call this endpoint once per morning. Each user
+         *     receives a digest of their own contacts at their own preferred email.
+         *     A failure for one user (e.g. Gmail API error) is logged and skipped
+         *     so the rest of the fan-out still completes.
+         *
+         *     Args:
+         *         _auth: Resolved OIDC auth dependency.
+         *         contacts: Contact repository (used per-owner).
+         *         users: User repository — iterated to find every owner.
+         *         settings: Process settings (Gmail OAuth paths, from-address).
+         *         days: Look-ahead window in days.
+         *         today_override: Inject a fixed date for deterministic testing.
+         *
+         *     Returns:
+         *         :class:`DigestSendResponse` summarising the fan-out outcome.
+         */
+        post: operations["send_digest_internal_digest_send_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get (or create) the caller's profile
+         * @description Return the caller's profile, creating it on first sign-in.
+         *
+         *     Args:
+         *         repo: Injected :class:`UserRepository`.
+         *         identity: Authenticated caller — supplies the ``uid`` and verified
+         *             email.
+         *
+         *     Returns:
+         *         The :class:`UserProfileResponse` for the caller's profile.
+         */
+        get: operations["get_or_create_profile_me_get"];
+        /**
+         * Update the caller's profile
+         * @description Apply a partial update to the caller's profile.
+         *
+         *     Args:
+         *         body: Partial update — only fields explicitly provided are applied.
+         *         repo: Injected :class:`UserRepository`.
+         *         identity: Authenticated caller.
+         *
+         *     Returns:
+         *         The updated :class:`UserProfileResponse`.
+         */
+        put: operations["update_profile_me_put"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -317,6 +440,8 @@ export interface components {
          *
          *     Matches the :class:`Contact` fields but uses ``str`` for UUID/datetime
          *     so JSON serialization is explicit and stable across Python versions.
+         *     The ``owner_id`` is intentionally not exposed on the wire — callers
+         *     only ever see their own contacts so it carries no useful information.
          */
         ContactResponse: {
             /**
@@ -351,8 +476,32 @@ export interface components {
             days_until_birthday?: number | null;
         };
         /**
+         * ContactsPage
+         * @description Paginated envelope for ``GET /contacts``.
+         *
+         *     Attributes:
+         *         items: The contacts in the current page, in the route's sort order.
+         *         next_cursor: Opaque cursor for the next page (the last item's UUID
+         *             as a string), or ``None`` when no more pages remain.
+         *         total: Total number of contacts matching the current filter — the
+         *             full count, not the page length. Used by the UI for
+         *             ``Page X of Y`` displays.
+         */
+        ContactsPage: {
+            /** Items */
+            items: components["schemas"]["ContactResponse"][];
+            /** Next Cursor */
+            next_cursor?: string | null;
+            /** Total */
+            total: number;
+        };
+        /**
          * CreateContactBody
          * @description Request body for ``POST /contacts``.
+         *
+         *     Note that ``owner_id`` is intentionally not a field — it is set
+         *     server-side from the authenticated identity so callers cannot
+         *     impersonate other users by spoofing it.
          */
         CreateContactBody: {
             /**
@@ -379,6 +528,73 @@ export interface components {
             address?: components["schemas"]["Address"] | null;
             /** @description Birthday. */
             birthday?: components["schemas"]["Birthday"] | null;
+        };
+        /**
+         * DigestSendResponse
+         * @description Response body for ``POST /internal/digest/send``.
+         *
+         *     Attributes:
+         *         date: The calendar date used as reference (ISO 8601).
+         *         users: Per-user outcome — one entry per known profile.
+         *         delivered: Total emails actually sent across all users.
+         *         skipped: Users who would have received a digest but the
+         *             per-process idempotency guard suppressed it.
+         *         failed: Users whose delivery raised an exception (continued).
+         */
+        DigestSendResponse: {
+            /** Date */
+            date: string;
+            /** Users */
+            users: components["schemas"]["DigestUserResult"][];
+            /** Delivered */
+            delivered: number;
+            /** Skipped */
+            skipped: number;
+            /** Failed */
+            failed: number;
+        };
+        /**
+         * DigestUpcomingResponse
+         * @description Response body for ``GET /internal/digest/upcoming``.
+         *
+         *     Attributes:
+         *         owner_id: Owner whose upcoming birthdays are listed.
+         *         days: The look-ahead window used.
+         *         count: Number of upcoming birthdays found.
+         *         items: The list of upcoming birthdays sorted by days_until.
+         */
+        DigestUpcomingResponse: {
+            /** Owner Id */
+            owner_id: string;
+            /** Days */
+            days: number;
+            /** Count */
+            count: number;
+            /** Items */
+            items: components["schemas"]["UpcomingBirthdayResponse"][];
+        };
+        /**
+         * DigestUserResult
+         * @description Per-user outcome inside :class:`DigestSendResponse`.
+         *
+         *     Attributes:
+         *         owner_id: Firebase ``uid`` of the user this entry describes.
+         *         owner_email: Address the digest was (or would be) sent to.
+         *         sent: Whether an email was actually delivered.
+         *         count: Number of upcoming birthdays in the digest.
+         *         error: Failure message if delivery raised. ``None`` on success.
+         */
+        DigestUserResult: {
+            /** Owner Id */
+            owner_id: string;
+            /** Owner Email */
+            owner_email: string;
+            /** Sent */
+            sent: boolean;
+            /** Count */
+            count: number;
+            /** Error */
+            error?: string | null;
         };
         /**
          * FormMetadataResponse
@@ -493,6 +709,26 @@ export interface components {
             firestore: string;
         };
         /**
+         * UpcomingBirthdayResponse
+         * @description Wire representation of :class:`~birthday_tracker.services.digest.UpcomingBirthday`.
+         *
+         *     Attributes:
+         *         contact_id: UUID string of the contact.
+         *         full_name: Contact's full legal name.
+         *         preferred_name: Nickname, if set.
+         *         days_until: Days until the next birthday occurrence (0 = today).
+         */
+        UpcomingBirthdayResponse: {
+            /** Contact Id */
+            contact_id: string;
+            /** Full Name */
+            full_name: string;
+            /** Preferred Name */
+            preferred_name: string | null;
+            /** Days Until */
+            days_until: number;
+        };
+        /**
          * UpdateContactBody
          * @description Request body for ``PUT /contacts/{contact_id}``.
          *
@@ -509,6 +745,40 @@ export interface components {
             phone?: string | null;
             address?: components["schemas"]["Address"] | null;
             birthday?: components["schemas"]["Birthday"] | null;
+        };
+        /**
+         * UpdateProfileBody
+         * @description Request body for ``PUT /me`` — both fields optional.
+         */
+        UpdateProfileBody: {
+            /**
+             * Digest Owner Email
+             * @description Where the daily digest should be delivered. Defaults to the sign-in email.
+             */
+            digest_owner_email?: string | null;
+            /**
+             * Digest Timezone
+             * @description IANA timezone name used for digest date math.
+             */
+            digest_timezone?: string | null;
+        };
+        /**
+         * UserProfileResponse
+         * @description Wire representation of :class:`~birthday_tracker.models.User`.
+         */
+        UserProfileResponse: {
+            /** Id */
+            id: string;
+            /** Email */
+            email: string;
+            /** Digest Owner Email */
+            digest_owner_email: string | null;
+            /** Digest Timezone */
+            digest_timezone: string;
+            /** Created At */
+            created_at: string;
+            /** Updated At */
+            updated_at: string;
         };
         /** ValidationError */
         ValidationError: {
@@ -584,8 +854,14 @@ export interface operations {
             query?: {
                 /** @description When set, return only contacts whose birthday falls within the next *N* days (inclusive). Contacts without a birthday are excluded. */
                 upcoming_in_days?: number | null;
+                /** @description Maximum number of items to return in this page. */
+                limit?: number;
+                /** @description Opaque pagination cursor — the ``id`` of the last item from the previous page. Items strictly after that position in the route's sort order are returned. */
+                cursor?: string | null;
             };
-            header?: never;
+            header?: {
+                authorization?: string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -597,7 +873,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ContactResponse"][];
+                    "application/json": components["schemas"]["ContactsPage"];
                 };
             };
             /** @description Validation Error */
@@ -614,7 +890,9 @@ export interface operations {
     create_contact_contacts_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -647,7 +925,9 @@ export interface operations {
     get_contact_contacts__contact_id__get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string;
+            };
             path: {
                 contact_id: string;
             };
@@ -678,7 +958,9 @@ export interface operations {
     update_contact_contacts__contact_id__put: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string;
+            };
             path: {
                 contact_id: string;
             };
@@ -713,7 +995,9 @@ export interface operations {
     delete_contact_contacts__contact_id__delete: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string;
+            };
             path: {
                 contact_id: string;
             };
@@ -742,7 +1026,9 @@ export interface operations {
     issue_collection_request_collection_requests_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                authorization?: string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -875,6 +1161,144 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    get_upcoming_birthdays_internal_digest_upcoming_get: {
+        parameters: {
+            query: {
+                /** @description Firebase uid of the user to inspect. */
+                owner_id: string;
+                /** @description Look-ahead window in days (inclusive). */
+                days?: number;
+            };
+            header?: {
+                authorization?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DigestUpcomingResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    send_digest_internal_digest_send_post: {
+        parameters: {
+            query?: {
+                /** @description Look-ahead window in days (inclusive). */
+                days?: number;
+                /** @description Override today's date (ISO 8601). Test use only. */
+                today?: string | null;
+            };
+            header?: {
+                authorization?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DigestSendResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_or_create_profile_me_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserProfileResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_profile_me_put: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateProfileBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserProfileResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
             };
         };
     };

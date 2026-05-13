@@ -111,6 +111,23 @@ class ContactResponse(BaseModel):
     )
 
 
+class ContactsPage(BaseModel):
+    """Paginated envelope for ``GET /contacts``.
+
+    Attributes:
+        items: The contacts in the current page, in the route's sort order.
+        next_cursor: Opaque cursor for the next page (the last item's UUID
+            as a string), or ``None`` when no more pages remain.
+        total: Total number of contacts matching the current filter — the
+            full count, not the page length. Used by the UI for
+            ``Page X of Y`` displays.
+    """
+
+    items: list[ContactResponse]
+    next_cursor: str | None = None
+    total: int
+
+
 # ---------------------------------------------------------------------------
 # Birthday helpers
 # ---------------------------------------------------------------------------
@@ -177,8 +194,8 @@ def _build_response(contact: Contact) -> ContactResponse:
 
 @router.get(
     "",
-    response_model=list[ContactResponse],
-    summary="List the caller's contacts",
+    response_model=ContactsPage,
+    summary="List the caller's contacts (paginated)",
 )
 async def list_contacts(
     repo: Annotated[ContactRepository, Depends(get_contact_repository)],
@@ -195,8 +212,26 @@ async def list_contacts(
             ),
         ),
     ] = None,
-) -> list[ContactResponse]:
-    """Return the authenticated user's contacts, optionally filtered to upcoming birthdays.
+    limit: Annotated[
+        int,
+        Query(
+            ge=1,
+            le=100,
+            description="Maximum number of items to return in this page.",
+        ),
+    ] = 10,
+    cursor: Annotated[
+        str | None,
+        Query(
+            description=(
+                "Opaque pagination cursor — the ``id`` of the last item from "
+                "the previous page. Items strictly after that position in the "
+                "route's sort order are returned."
+            ),
+        ),
+    ] = None,
+) -> ContactsPage:
+    """Return one page of the authenticated user's contacts.
 
     Args:
         repo: Injected :class:`ContactRepository`.
@@ -204,11 +239,20 @@ async def list_contacts(
         upcoming_in_days: Optional filter: only contacts with a birthday
             within the next ``upcoming_in_days`` calendar days are returned.
             Contacts without a birthday are omitted when this filter is active.
+        limit: Page size; defaults to 10, capped at 100.
+        cursor: Opaque cursor returned by a previous request; resume after
+            the contact with that ``id`` in the route's sort order.
 
     Returns:
-        List of :class:`ContactResponse` objects, ordered by
-        ``days_until_birthday`` when ``upcoming_in_days`` is set, otherwise
-        by ascending ``full_name``.
+        A :class:`ContactsPage` with the page items, the next cursor (or
+        ``None`` if exhausted), and the total count of items matching the
+        current filter (used by the UI for ``Page X of Y``).
+
+    Raises:
+        APIError: 400 when ``cursor`` does not refer to any item in the
+            current filtered set — the client likely raced a delete or
+            sent a stale URL; treat this as a recoverable error and reset
+            paging.
     """
     contacts = await repo.list_for_owner(identity.user_id)
     responses = [_build_response(c) for c in contacts]
@@ -219,11 +263,36 @@ async def list_contacts(
             for r in responses
             if r.days_until_birthday is not None and r.days_until_birthday <= upcoming_in_days
         ]
-        responses.sort(key=lambda r: r.days_until_birthday or 0)
+        # Tie-break by ``id`` so the sort is deterministic across calls;
+        # the cursor relies on the position of an ``id`` being stable.
+        responses.sort(key=lambda r: (r.days_until_birthday or 0, str(r.id)))
     else:
-        responses.sort(key=lambda r: r.full_name.lower())
+        responses.sort(key=lambda r: (r.full_name.lower(), str(r.id)))
 
-    return responses
+    total = len(responses)
+    start = 0
+    if cursor is not None:
+        for index, item in enumerate(responses):
+            if str(item.id) == cursor:
+                start = index + 1
+                break
+        else:
+            raise APIError(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                title="Invalid pagination cursor",
+                detail=(
+                    "The cursor does not match any current contact. The "
+                    "underlying data may have changed; reset to the first "
+                    "page and try again."
+                ),
+            )
+
+    page_items = responses[start : start + limit]
+    next_cursor: str | None = None
+    if start + limit < total and page_items:
+        next_cursor = str(page_items[-1].id)
+
+    return ContactsPage(items=page_items, next_cursor=next_cursor, total=total)
 
 
 @router.post(
