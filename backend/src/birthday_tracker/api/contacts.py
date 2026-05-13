@@ -230,23 +230,40 @@ async def list_contacts(
             ),
         ),
     ] = None,
+    q: Annotated[
+        str | None,
+        Query(
+            max_length=200,
+            description=(
+                "Case-insensitive prefix search across full name, preferred "
+                "name, and email. Whitespace-only values are treated as no "
+                "filter. Ignored when ``upcoming_in_days`` is set."
+            ),
+        ),
+    ] = None,
 ) -> ContactsPage:
     """Return one page of the authenticated user's contacts.
+
+    Two modes:
+
+    - ``upcoming_in_days`` set → birthday filter applied in Python over
+      the full set (the existing behaviour from #31). Sorted by
+      ``(days_until_birthday, id)``. ``q`` is ignored in this mode.
+    - ``upcoming_in_days`` unset → server-side paged query through the
+      repository, sorted by ``(full_name_lower, id)`` and optionally
+      narrowed by ``q`` (prefix match across name / preferred name /
+      email).
 
     Args:
         repo: Injected :class:`ContactRepository`.
         identity: Authenticated caller — scopes the listing to their data.
-        upcoming_in_days: Optional filter: only contacts with a birthday
-            within the next ``upcoming_in_days`` calendar days are returned.
-            Contacts without a birthday are omitted when this filter is active.
+        upcoming_in_days: Optional birthday-window filter.
         limit: Page size; defaults to 10, capped at 100.
-        cursor: Opaque cursor returned by a previous request; resume after
-            the contact with that ``id`` in the route's sort order.
+        cursor: Opaque cursor returned by a previous request.
+        q: Optional prefix search; ignored when ``upcoming_in_days`` is set.
 
     Returns:
-        A :class:`ContactsPage` with the page items, the next cursor (or
-        ``None`` if exhausted), and the total count of items matching the
-        current filter (used by the UI for ``Page X of Y``).
+        A :class:`ContactsPage` with items, ``next_cursor``, and ``total``.
 
     Raises:
         APIError: 400 when ``cursor`` does not refer to any item in the
@@ -254,20 +271,64 @@ async def list_contacts(
             sent a stale URL; treat this as a recoverable error and reset
             paging.
     """
-    contacts = await repo.list_for_owner(identity.user_id)
-    responses = [_build_response(c) for c in contacts]
-
     if upcoming_in_days is not None:
-        responses = [
-            r
-            for r in responses
-            if r.days_until_birthday is not None and r.days_until_birthday <= upcoming_in_days
-        ]
-        # Tie-break by ``id`` so the sort is deterministic across calls;
-        # the cursor relies on the position of an ``id`` being stable.
-        responses.sort(key=lambda r: (r.days_until_birthday or 0, str(r.id)))
-    else:
-        responses.sort(key=lambda r: (r.full_name.lower(), str(r.id)))
+        return _upcoming_page(
+            await repo.list_for_owner(identity.user_id),
+            upcoming_in_days=upcoming_in_days,
+            limit=limit,
+            cursor=cursor,
+        )
+
+    items, next_cursor = await repo.list_page(identity.user_id, limit=limit, cursor=cursor, q=q)
+    if cursor is not None and not items and next_cursor is None:
+        # The repository returns an empty page when the cursor is
+        # unknown (its in the contract). Surface that as the same 400
+        # the upcoming-mode path raises so the frontend can react with
+        # a reset rather than rendering an unexplained blank table.
+        # Distinguishing "valid empty page" from "stale cursor" without
+        # a second call: if the count is zero, the empty result is
+        # legitimate; otherwise the cursor was bad.
+        total = await repo.count_for_owner(identity.user_id, q=q)
+        if total > 0:
+            raise APIError(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                title="Invalid pagination cursor",
+                detail=(
+                    "The cursor does not match any current contact. The "
+                    "underlying data may have changed; reset to the first "
+                    "page and try again."
+                ),
+            )
+        return ContactsPage(items=[], next_cursor=None, total=0)
+
+    total = await repo.count_for_owner(identity.user_id, q=q)
+    return ContactsPage(
+        items=[_build_response(c) for c in items],
+        next_cursor=next_cursor,
+        total=total,
+    )
+
+
+def _upcoming_page(
+    contacts: list[Contact],
+    *,
+    upcoming_in_days: int,
+    limit: int,
+    cursor: str | None,
+) -> ContactsPage:
+    """Compose the upcoming-birthdays page from a fully-loaded contact list.
+
+    Kept as the in-Python path for the date-window filter; replacing it
+    with a repository query needs a denormalized ``next_birthday_at``
+    field (tracked separately).
+    """
+    responses = [_build_response(c) for c in contacts]
+    responses = [
+        r
+        for r in responses
+        if r.days_until_birthday is not None and r.days_until_birthday <= upcoming_in_days
+    ]
+    responses.sort(key=lambda r: (r.days_until_birthday or 0, str(r.id)))
 
     total = len(responses)
     start = 0

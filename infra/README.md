@@ -65,10 +65,32 @@ gcloud firestore databases create \
 ```
 
 The backend uses three top-level collections — `contacts`, `collection_requests`,
-and `users` — keyed by UUID / Firebase uid. Owner-scoped queries on
-`contacts` filter by `owner_id`, which requires a single-field index that
-Firestore creates automatically on first write. No composite index is
-required for the current query shapes.
+and `users` — keyed by UUID / Firebase uid.
+
+**Composite indexes** for the contacts list page (paged + searchable) live in
+[`infra/firestore.indexes.json`](firestore.indexes.json). Apply them with the
+Firebase CLI:
+
+```bash
+# One-time per project: install firebase-tools and pick the project.
+npm install -g firebase-tools
+firebase login
+firebase use "$PROJECT_ID"
+
+# Deploy the indexes (idempotent — re-running with no changes is a no-op).
+firebase deploy --only firestore:indexes --config <(cat <<EOF
+{
+  "firestore": {
+    "indexes": "infra/firestore.indexes.json",
+    "rules": "/dev/null"
+  }
+}
+EOF
+)
+```
+
+The other owner-scoped queries (single-field `owner_id == X`) use indexes that
+Firestore creates automatically on first write.
 
 ---
 

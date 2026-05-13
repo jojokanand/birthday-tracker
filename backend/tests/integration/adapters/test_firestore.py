@@ -80,3 +80,76 @@ async def test_duplicate_details_across_tenants(
     firestore_repo: FirestoreContactRepository,
 ) -> None:
     await contract.assert_duplicate_details_across_tenants_allowed(firestore_repo)
+
+
+# ----- list_page / count_for_owner --------------------------------------
+
+
+@pytest.mark.integration
+async def test_list_page_orders_by_full_name_lower(
+    firestore_repo: FirestoreContactRepository,
+) -> None:
+    await contract.assert_list_page_orders_by_full_name_lower(firestore_repo)
+
+
+@pytest.mark.integration
+async def test_list_page_walks_via_cursor(
+    firestore_repo: FirestoreContactRepository,
+) -> None:
+    await contract.assert_list_page_walks_via_cursor(firestore_repo)
+
+
+@pytest.mark.integration
+async def test_count_for_owner_returns_total(
+    firestore_repo: FirestoreContactRepository,
+) -> None:
+    await contract.assert_count_for_owner_returns_total(firestore_repo)
+
+
+@pytest.mark.integration
+async def test_q_prefix_matches_full_name(
+    firestore_repo: FirestoreContactRepository,
+) -> None:
+    await contract.assert_q_prefix_matches_full_name(firestore_repo)
+
+
+@pytest.mark.integration
+async def test_q_prefix_matches_preferred_name(
+    firestore_repo: FirestoreContactRepository,
+) -> None:
+    await contract.assert_q_prefix_matches_preferred_name(firestore_repo)
+
+
+@pytest.mark.integration
+async def test_q_prefix_matches_email(
+    firestore_repo: FirestoreContactRepository,
+) -> None:
+    await contract.assert_q_prefix_matches_email(firestore_repo)
+
+
+@pytest.mark.integration
+async def test_q_dedupes_overlapping_matches(
+    firestore_repo: FirestoreContactRepository,
+) -> None:
+    await contract.assert_q_dedupes_overlapping_matches(firestore_repo)
+
+
+@pytest.mark.integration
+async def test_q_whitespace_only_is_no_filter(
+    firestore_repo: FirestoreContactRepository,
+) -> None:
+    await contract.assert_q_whitespace_only_is_no_filter(firestore_repo)
+
+
+@pytest.mark.integration
+async def test_unknown_cursor_yields_empty_page(
+    firestore_repo: FirestoreContactRepository,
+) -> None:
+    await contract.assert_unknown_cursor_yields_empty_page(firestore_repo)
+
+
+@pytest.mark.integration
+async def test_list_page_isolates_tenants(
+    firestore_repo: FirestoreContactRepository,
+) -> None:
+    await contract.assert_list_page_isolates_tenants(firestore_repo)

@@ -59,7 +59,7 @@
                     "contacts"
                 ],
                 "summary": "List the caller's contacts (paginated)",
-                "description": "Return one page of the authenticated user's contacts.\n\nArgs:\n    repo: Injected :class:`ContactRepository`.\n    identity: Authenticated caller \u2014 scopes the listing to their data.\n    upcoming_in_days: Optional filter: only contacts with a birthday\n        within the next ``upcoming_in_days`` calendar days are returned.\n        Contacts without a birthday are omitted when this filter is active.\n    limit: Page size; defaults to 10, capped at 100.\n    cursor: Opaque cursor returned by a previous request; resume after\n        the contact with that ``id`` in the route's sort order.\n\nReturns:\n    A :class:`ContactsPage` with the page items, the next cursor (or\n    ``None`` if exhausted), and the total count of items matching the\n    current filter (used by the UI for ``Page X of Y``).\n\nRaises:\n    APIError: 400 when ``cursor`` does not refer to any item in the\n        current filtered set \u2014 the client likely raced a delete or\n        sent a stale URL; treat this as a recoverable error and reset\n        paging.",
+                "description": "Return one page of the authenticated user's contacts.\n\nTwo modes:\n\n- ``upcoming_in_days`` set \u2192 birthday filter applied in Python over\n  the full set (the existing behaviour from #31). Sorted by\n  ``(days_until_birthday, id)``. ``q`` is ignored in this mode.\n- ``upcoming_in_days`` unset \u2192 server-side paged query through the\n  repository, sorted by ``(full_name_lower, id)`` and optionally\n  narrowed by ``q`` (prefix match across name / preferred name /\n  email).\n\nArgs:\n    repo: Injected :class:`ContactRepository`.\n    identity: Authenticated caller \u2014 scopes the listing to their data.\n    upcoming_in_days: Optional birthday-window filter.\n    limit: Page size; defaults to 10, capped at 100.\n    cursor: Opaque cursor returned by a previous request.\n    q: Optional prefix search; ignored when ``upcoming_in_days`` is set.\n\nReturns:\n    A :class:`ContactsPage` with items, ``next_cursor``, and ``total``.\n\nRaises:\n    APIError: 400 when ``cursor`` does not refer to any item in the\n        current filtered set \u2014 the client likely raced a delete or\n        sent a stale URL; treat this as a recoverable error and reset\n        paging.",
                 "operationId": "list_contacts_contacts_get",
                 "parameters": [
                     {
@@ -113,6 +113,25 @@
                             "title": "Cursor"
                         },
                         "description": "Opaque pagination cursor \u2014 the ``id`` of the last item from the previous page. Items strictly after that position in the route's sort order are returned."
+                    },
+                    {
+                        "name": "q",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string",
+                                    "maxLength": 200
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "description": "Case-insensitive prefix search across full name, preferred name, and email. Whitespace-only values are treated as no filter. Ignored when ``upcoming_in_days`` is set.",
+                            "title": "Q"
+                        },
+                        "description": "Case-insensitive prefix search across full name, preferred name, and email. Whitespace-only values are treated as no filter. Ignored when ``upcoming_in_days`` is set."
                     },
                     {
                         "name": "authorization",

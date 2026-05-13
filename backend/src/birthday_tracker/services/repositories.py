@@ -84,6 +84,63 @@ class ContactRepository(Protocol):
         """
         ...  # pragma: no cover
 
+    async def list_page(
+        self,
+        owner_id: str,
+        *,
+        limit: int,
+        cursor: str | None = None,
+        q: str | None = None,
+    ) -> tuple[list[Contact], str | None]:
+        """Return one page of contacts owned by ``owner_id`` ordered by name.
+
+        Sort key is ``(full_name_lower, id)`` so the cursor (the previous
+        page's last contact ``id``) gives a stable, no-overlap walk
+        forward through the result set. Implementations push paging into
+        the storage layer where possible — Firestore via
+        ``order_by``/``start_after``/``limit``, the in-memory fake by
+        slicing in Python.
+
+        Args:
+            owner_id: Firebase ``uid`` of the requesting user.
+            limit: Maximum number of items to return in this page.
+            cursor: ``id`` of the last contact from the previous page,
+                or ``None`` to start from the beginning. The contact
+                must still exist in the filtered set; otherwise
+                implementations may return an empty page.
+            q: Optional case-insensitive prefix search applied across
+                ``full_name``, ``preferred_name``, and ``email``. Empty
+                or whitespace-only ``q`` is treated as no filter.
+
+        Returns:
+            ``(items, next_cursor)``. ``next_cursor`` is the last item's
+            ``id`` (as a string) when more pages remain, else ``None``.
+        """
+        ...  # pragma: no cover
+
+    async def count_for_owner(
+        self,
+        owner_id: str,
+        *,
+        q: str | None = None,
+    ) -> int:
+        """Count contacts owned by ``owner_id``, optionally filtered by ``q``.
+
+        Used for "Page X of Y" displays. Firestore implementations should
+        use the ``count()`` aggregate (one billable unit) rather than
+        streaming every document.
+
+        Args:
+            owner_id: Firebase ``uid`` of the requesting user.
+            q: Optional case-insensitive prefix search applied to the
+                same fields as :meth:`list_page`. Empty or whitespace-
+                only ``q`` is treated as no filter.
+
+        Returns:
+            Total number of matching contacts.
+        """
+        ...  # pragma: no cover
+
 
 class CollectionRequestRepository(Protocol):
     """Persistence interface for :class:`~birthday_tracker.models.CollectionRequest`.

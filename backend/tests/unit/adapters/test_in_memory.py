@@ -78,3 +78,66 @@ async def test_list_for_owner_isolates_tenants(repo: InMemoryContactRepository) 
 @pytest.mark.unit
 async def test_duplicate_details_across_tenants(repo: InMemoryContactRepository) -> None:
     await contract.assert_duplicate_details_across_tenants_allowed(repo)
+
+
+# ----- list_page / count_for_owner --------------------------------------
+
+
+@pytest.mark.unit
+async def test_list_page_orders_by_full_name_lower(
+    repo: InMemoryContactRepository,
+) -> None:
+    await contract.assert_list_page_orders_by_full_name_lower(repo)
+
+
+@pytest.mark.unit
+async def test_list_page_walks_via_cursor(repo: InMemoryContactRepository) -> None:
+    await contract.assert_list_page_walks_via_cursor(repo)
+
+
+@pytest.mark.unit
+async def test_count_for_owner_returns_total(repo: InMemoryContactRepository) -> None:
+    await contract.assert_count_for_owner_returns_total(repo)
+
+
+@pytest.mark.unit
+async def test_q_prefix_matches_full_name(repo: InMemoryContactRepository) -> None:
+    await contract.assert_q_prefix_matches_full_name(repo)
+
+
+@pytest.mark.unit
+async def test_q_prefix_matches_preferred_name(
+    repo: InMemoryContactRepository,
+) -> None:
+    await contract.assert_q_prefix_matches_preferred_name(repo)
+
+
+@pytest.mark.unit
+async def test_q_prefix_matches_email(repo: InMemoryContactRepository) -> None:
+    await contract.assert_q_prefix_matches_email(repo)
+
+
+@pytest.mark.unit
+async def test_q_dedupes_overlapping_matches(
+    repo: InMemoryContactRepository,
+) -> None:
+    await contract.assert_q_dedupes_overlapping_matches(repo)
+
+
+@pytest.mark.unit
+async def test_q_whitespace_only_is_no_filter(
+    repo: InMemoryContactRepository,
+) -> None:
+    await contract.assert_q_whitespace_only_is_no_filter(repo)
+
+
+@pytest.mark.unit
+async def test_unknown_cursor_yields_empty_page(
+    repo: InMemoryContactRepository,
+) -> None:
+    await contract.assert_unknown_cursor_yields_empty_page(repo)
+
+
+@pytest.mark.unit
+async def test_list_page_isolates_tenants(repo: InMemoryContactRepository) -> None:
+    await contract.assert_list_page_isolates_tenants(repo)

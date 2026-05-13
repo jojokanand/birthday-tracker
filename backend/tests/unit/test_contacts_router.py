@@ -348,6 +348,189 @@ async def test_list_unknown_cursor_returns_400() -> None:
     assert resp.json()["title"] == "Invalid pagination cursor"
 
 
+# ---------------------------------------------------------------------------
+# GET /contacts — search (`q`)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+async def test_list_q_matches_full_name_prefix_case_insensitive() -> None:
+    """``?q=ada`` matches ``Ada Lovelace`` regardless of source case."""
+    repo = InMemoryContactRepository()
+    await _seed(repo, full_name="Ada Lovelace", email="ada@example.com")
+    await _seed(repo, full_name="Marco Polo", email="m@example.com")
+
+    client = _build_client(repo)
+    body = client.get("/contacts", params={"q": "ada"}).json()
+
+    names = [c["full_name"] for c in body["items"]]
+    assert names == ["Ada Lovelace"]
+    assert body["total"] == 1
+
+
+@pytest.mark.unit
+async def test_list_q_matches_preferred_name_prefix() -> None:
+    """``q`` searches preferred_name in addition to full_name."""
+    repo = InMemoryContactRepository()
+    await _seed(
+        repo,
+        full_name="Augusta King",
+        preferred_name="Ada",
+        email="aking@example.com",
+    )
+    await _seed(repo, full_name="Marco Polo", email="m@example.com")
+
+    client = _build_client(repo)
+    body = client.get("/contacts", params={"q": "ada"}).json()
+
+    names = [c["full_name"] for c in body["items"]]
+    assert names == ["Augusta King"]
+
+
+@pytest.mark.unit
+async def test_list_q_matches_email_prefix() -> None:
+    """``q`` searches email in addition to the name fields."""
+    repo = InMemoryContactRepository()
+    await _seed(repo, full_name="Marco Polo", email="ada@example.com")
+    await _seed(repo, full_name="Bob Other", email="bob@example.com")
+
+    client = _build_client(repo)
+    body = client.get("/contacts", params={"q": "ada@"}).json()
+
+    names = [c["full_name"] for c in body["items"]]
+    assert names == ["Marco Polo"]
+
+
+@pytest.mark.unit
+async def test_list_q_dedupes_when_multiple_fields_match() -> None:
+    """A single contact whose name AND email both match returns once."""
+    repo = InMemoryContactRepository()
+    await _seed(repo, full_name="Ada Lovelace", email="ada@example.com")
+
+    client = _build_client(repo)
+    body = client.get("/contacts", params={"q": "ada"}).json()
+
+    assert len(body["items"]) == 1
+    assert body["total"] == 1
+
+
+@pytest.mark.unit
+async def test_list_q_whitespace_only_is_no_filter() -> None:
+    """``q='   '`` is treated as no filter — returns everything."""
+    repo = InMemoryContactRepository()
+    await _seed(repo, full_name="Ada Lovelace", email="ada@example.com")
+    await _seed(repo, full_name="Bob Other", email="bob@example.com")
+
+    client = _build_client(repo)
+    body = client.get("/contacts", params={"q": "   "}).json()
+
+    assert body["total"] == 2
+    assert {c["full_name"] for c in body["items"]} == {"Ada Lovelace", "Bob Other"}
+
+
+@pytest.mark.unit
+async def test_list_q_count_reflects_filtered_set() -> None:
+    """``total`` returns the count of filtered matches, not the global total."""
+    repo = InMemoryContactRepository()
+    await _seed(repo, full_name="Ada Lovelace", email="ada@example.com")
+    await _seed(repo, full_name="Adam Smith", email="adam@example.com")
+    await _seed(repo, full_name="Bob Other", email="bob@example.com")
+
+    client = _build_client(repo)
+    body = client.get("/contacts", params={"q": "ad"}).json()
+
+    assert body["total"] == 2
+    assert {c["full_name"] for c in body["items"]} == {"Ada Lovelace", "Adam Smith"}
+
+
+@pytest.mark.unit
+async def test_list_q_paginates_filtered_results() -> None:
+    """Cursor pagination walks the filtered set, not the global one."""
+    repo = InMemoryContactRepository()
+    for i in range(15):
+        await _seed(repo, full_name=f"Ada User {i:02d}", email=f"u{i:02d}@example.com")
+    # A few non-matches to make sure they're excluded.
+    await _seed(repo, full_name="Bob Other", email="bob@example.com")
+
+    client = _build_client(repo)
+    first = client.get("/contacts", params={"q": "ada", "limit": 10}).json()
+    assert len(first["items"]) == 10
+    assert first["total"] == 15
+
+    second = client.get(
+        "/contacts",
+        params={"q": "ada", "limit": 10, "cursor": first["next_cursor"]},
+    ).json()
+    assert len(second["items"]) == 5
+    assert second["next_cursor"] is None
+
+
+@pytest.mark.unit
+async def test_list_q_unknown_cursor_returns_400() -> None:
+    """A cursor that doesn't appear in the filtered set returns 400."""
+    repo = InMemoryContactRepository()
+    await _seed(repo, full_name="Ada Lovelace", email="ada@example.com")
+
+    client = _build_client(repo)
+    resp = client.get("/contacts", params={"q": "ada", "cursor": str(uuid4())})
+
+    assert resp.status_code == 400
+    assert resp.json()["title"] == "Invalid pagination cursor"
+
+
+@pytest.mark.unit
+async def test_list_q_empty_set_returns_zero_total_no_400() -> None:
+    """When ``q`` matches nothing, the response is empty + 200 (not 400)."""
+    repo = InMemoryContactRepository()
+    await _seed(repo, full_name="Marco Polo", email="m@example.com")
+
+    client = _build_client(repo)
+    resp = client.get("/contacts", params={"q": "zzz"})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body == {"items": [], "next_cursor": None, "total": 0}
+
+
+# ---------------------------------------------------------------------------
+# Contact model — lowercase mirror fields
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_contact_lowercase_mirrors_set_on_construction() -> None:
+    """Mirror fields are derived from the source values at instantiation."""
+    contact = Contact(
+        owner_id=DEV_OWNER,
+        full_name="Ada LOVELACE",
+        preferred_name="ADA",
+        email="Ada@Example.COM",
+    )
+    assert contact.full_name_lower == "ada lovelace"
+    assert contact.preferred_name_lower == "ada"
+    assert contact.email_lower == "ada@example.com"
+
+
+@pytest.mark.unit
+def test_contact_lowercase_mirrors_recomputed_on_update() -> None:
+    """Mirrors update when the source fields are replaced via model_validate."""
+    contact = Contact(owner_id=DEV_OWNER, full_name="Old Name", email="old@example.com")
+    new = Contact.model_validate(
+        contact.model_dump() | {"full_name": "Brand New", "email": "new@example.com"}
+    )
+    assert new.full_name_lower == "brand new"
+    assert new.email_lower == "new@example.com"
+
+
+@pytest.mark.unit
+def test_contact_lowercase_mirrors_handle_optional_fields() -> None:
+    """``preferred_name_lower`` / ``email_lower`` are ``None`` when the source is."""
+    contact = Contact(owner_id=DEV_OWNER, full_name="Phone Only", phone="+14155551234")
+    assert contact.full_name_lower == "phone only"
+    assert contact.preferred_name_lower is None
+    assert contact.email_lower is None
+
+
 @pytest.mark.unit
 async def test_list_upcoming_with_cursor_paginates() -> None:
     """Pagination works when the upcoming filter is active."""

@@ -69,20 +69,26 @@ export interface paths {
          * List the caller's contacts (paginated)
          * @description Return one page of the authenticated user's contacts.
          *
+         *     Two modes:
+         *
+         *     - ``upcoming_in_days`` set → birthday filter applied in Python over
+         *       the full set (the existing behaviour from #31). Sorted by
+         *       ``(days_until_birthday, id)``. ``q`` is ignored in this mode.
+         *     - ``upcoming_in_days`` unset → server-side paged query through the
+         *       repository, sorted by ``(full_name_lower, id)`` and optionally
+         *       narrowed by ``q`` (prefix match across name / preferred name /
+         *       email).
+         *
          *     Args:
          *         repo: Injected :class:`ContactRepository`.
          *         identity: Authenticated caller — scopes the listing to their data.
-         *         upcoming_in_days: Optional filter: only contacts with a birthday
-         *             within the next ``upcoming_in_days`` calendar days are returned.
-         *             Contacts without a birthday are omitted when this filter is active.
+         *         upcoming_in_days: Optional birthday-window filter.
          *         limit: Page size; defaults to 10, capped at 100.
-         *         cursor: Opaque cursor returned by a previous request; resume after
-         *             the contact with that ``id`` in the route's sort order.
+         *         cursor: Opaque cursor returned by a previous request.
+         *         q: Optional prefix search; ignored when ``upcoming_in_days`` is set.
          *
          *     Returns:
-         *         A :class:`ContactsPage` with the page items, the next cursor (or
-         *         ``None`` if exhausted), and the total count of items matching the
-         *         current filter (used by the UI for ``Page X of Y``).
+         *         A :class:`ContactsPage` with items, ``next_cursor``, and ``total``.
          *
          *     Raises:
          *         APIError: 400 when ``cursor`` does not refer to any item in the
@@ -858,6 +864,8 @@ export interface operations {
                 limit?: number;
                 /** @description Opaque pagination cursor — the ``id`` of the last item from the previous page. Items strictly after that position in the route's sort order are returned. */
                 cursor?: string | null;
+                /** @description Case-insensitive prefix search across full name, preferred name, and email. Whitespace-only values are treated as no filter. Ignored when ``upcoming_in_days`` is set. */
+                q?: string | null;
             };
             header?: {
                 authorization?: string;
