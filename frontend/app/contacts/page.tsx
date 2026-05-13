@@ -27,6 +27,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { AddToCalendarMenu } from "@/components/add-to-calendar-menu";
 import { CreateContactDialog } from "@/components/create-contact-dialog";
 import { DeleteContactDialog } from "@/components/delete-contact-dialog";
 import { EditContactDialog } from "@/components/edit-contact-dialog";
@@ -333,6 +334,7 @@ function ContactsContent() {
                         >
                           <Trash2 className="size-4" />
                         </Button>
+                        {c.birthday && <AddToCalendarMenu contact={c} />}
                         <Link
                           href={`/contacts/new?contact_id=${c.id}`}
                           className="inline-flex h-7 items-center rounded-[min(var(--radius-md),12px)] border border-border bg-background px-2.5 text-[0.8rem] font-medium text-foreground transition-colors hover:bg-muted"
