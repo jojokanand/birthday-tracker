@@ -28,33 +28,46 @@ GMAIL_SCOPES = ["https://www.googleapis.com/auth/gmail.send"]
 
 
 def load_gmail_credentials(
-    client_secrets_path: str,
-    token_path: str,
+    client_secrets_path: str = "",
+    token_path: str = "",
+    token_json: str = "",
 ) -> Credentials:
     """Load (or interactively mint) Gmail OAuth credentials.
 
-    Cached credentials are read from ``token_path``. When absent or expired
-    without a refresh token, a local OAuth server is started and the user is
-    walked through a browser-based consent flow; the resulting credentials
-    are then written to ``token_path`` for future runs.
+    Three modes, in priority order:
+
+    1. ``token_json`` set — parse the credentials directly from the JSON
+       string. Used in production where the refresh token is mounted as
+       a Secret Manager env var rather than a file (Cloud Run has no
+       writable persistent disk).
+    2. ``token_path`` exists on disk — load cached credentials from the
+       file. The default for local development.
+    3. Otherwise — fall back to the interactive OAuth flow, requiring
+       ``client_secrets_path`` to be set. Writes the new token to
+       ``token_path`` for next time.
+
+    Expired credentials with a refresh token are refreshed in place
+    (and re-written to disk when ``token_path`` is set).
 
     Args:
-        client_secrets_path: Path to the OAuth client_secret.json downloaded
-            from the GCP Console.
-        token_path: Path where the refresh token is cached. Should be
-            outside the repository (or in a gitignored location) since it
-            grants send access to the user's Gmail.
+        client_secrets_path: Path to the OAuth client_secret.json
+            downloaded from the GCP Console. Required only when the
+            interactive flow has to run.
+        token_path: Path where the refresh token is cached on disk.
+        token_json: Raw token JSON content (e.g. read from an env var
+            or Secret Manager). Takes precedence over ``token_path``.
 
     Returns:
-        A :class:`google.oauth2.credentials.Credentials` ready to use with
-        the Gmail API client.
+        A :class:`google.oauth2.credentials.Credentials` ready to use
+        with the Gmail API client.
 
     Raises:
-        ValueError: If ``client_secrets_path`` is empty.
+        ValueError: When none of the three modes can produce credentials —
+            specifically, ``token_json`` is empty, ``token_path`` does
+            not exist, and ``client_secrets_path`` is also empty so the
+            interactive flow can't run.
     """
-    if not client_secrets_path:
-        raise ValueError("client_secrets_path must be non-empty")
-
+    import json  # noqa: PLC0415
     import os  # noqa: PLC0415
 
     from google.auth.transport.requests import Request  # noqa: PLC0415
@@ -62,9 +75,13 @@ def load_gmail_credentials(
     from google_auth_oauthlib.flow import InstalledAppFlow  # noqa: PLC0415
 
     creds: Credentials | None = None
-    if token_path and os.path.exists(token_path):
-        # Both google-auth methods we touch lack inline type stubs — silence
-        # mypy's no-untyped-call rather than wrap them in shims.
+    if token_json:
+        # google-auth's typing for from_authorized_user_info is stubbed
+        # incompletely; runtime contract is well-defined.
+        creds = Credentials.from_authorized_user_info(  # type: ignore[no-untyped-call]
+            json.loads(token_json), GMAIL_SCOPES
+        )
+    elif token_path and os.path.exists(token_path):
         creds = Credentials.from_authorized_user_file(  # type: ignore[no-untyped-call]
             token_path, GMAIL_SCOPES
         )
@@ -73,9 +90,18 @@ def load_gmail_credentials(
         if creds is not None and creds.expired and creds.refresh_token:
             creds.refresh(Request())  # type: ignore[no-untyped-call]
         else:
+            if not client_secrets_path:
+                raise ValueError(
+                    "Cannot mint Gmail credentials: token_json / token_path "
+                    "missing or invalid, and client_secrets_path not set so "
+                    "the interactive OAuth flow can't run."
+                )
             flow = InstalledAppFlow.from_client_secrets_file(client_secrets_path, GMAIL_SCOPES)
             creds = flow.run_local_server(port=0)
-        if token_path:
+        # Persist refreshed creds back to disk only when we have a
+        # writable cache location and were not given raw JSON content
+        # (Cloud Run has no writable disk for the JSON-content path).
+        if token_path and not token_json:
             with open(token_path, "w", encoding="utf-8") as fh:
                 fh.write(creds.to_json())
     return creds

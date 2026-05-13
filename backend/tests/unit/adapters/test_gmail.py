@@ -79,9 +79,52 @@ def test_encode_email_round_trips() -> None:
 
 
 @pytest.mark.unit
-def test_load_gmail_credentials_rejects_blank_path() -> None:
-    with pytest.raises(ValueError, match="client_secrets_path must be non-empty"):
-        load_gmail_credentials(client_secrets_path="", token_path="/tmp/token.json")
+def test_load_gmail_credentials_rejects_when_no_source_available() -> None:
+    """No token JSON, no cached file, no client_secrets → ValueError."""
+    with pytest.raises(ValueError, match="Cannot mint Gmail credentials"):
+        load_gmail_credentials(client_secrets_path="", token_path="/tmp/does-not-exist.json")
+
+
+@pytest.mark.unit
+def test_load_gmail_credentials_uses_token_json_when_provided() -> None:
+    """Raw JSON token bypasses both the file path and the OAuth flow."""
+    cached = MagicMock(valid=True)
+    with patch(
+        "google.oauth2.credentials.Credentials.from_authorized_user_info",
+        return_value=cached,
+    ) as from_info:
+        result = load_gmail_credentials(
+            token_json='{"refresh_token": "fake"}',
+        )
+    assert result is cached
+    from_info.assert_called_once()
+
+
+@pytest.mark.unit
+def test_load_gmail_credentials_token_json_takes_precedence_over_path(
+    tmp_path: pytest.TempPathFactory,
+) -> None:
+    """When both ``token_json`` and ``token_path`` are given, JSON wins."""
+    token_file = os.path.join(str(tmp_path), "token.json")
+    with open(token_file, "w") as fh:
+        fh.write("{}")
+    cached = MagicMock(valid=True)
+    with (
+        patch(
+            "google.oauth2.credentials.Credentials.from_authorized_user_info",
+            return_value=cached,
+        ) as from_info,
+        patch(
+            "google.oauth2.credentials.Credentials.from_authorized_user_file",
+        ) as from_file,
+    ):
+        result = load_gmail_credentials(
+            token_path=token_file,
+            token_json='{"refresh_token": "fake"}',
+        )
+    assert result is cached
+    from_info.assert_called_once()
+    from_file.assert_not_called()
 
 
 @pytest.mark.unit

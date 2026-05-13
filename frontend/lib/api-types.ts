@@ -197,20 +197,32 @@ export interface paths {
         put?: never;
         /**
          * Issue a new collection request
-         * @description Mint a token and persist a pending collection request for the caller.
+         * @description Mint a signed form token, persist the request, and optionally deliver it.
          *
          *     Args:
-         *         body: Request payload with ``contact_id``, ``channel``, ``destination``.
+         *         body: ``contact_id``, ``channel``, ``destination``, plus the
+         *             optional ``send`` flag.
          *         service: Injected :class:`CollectionRequestService`.
+         *         requests: Injected :class:`CollectionRequestRepository` — used to
+         *             roll back the persisted request if the notifier fails so we
+         *             never leave a request the contact never received.
+         *         sms: Configured :class:`SmsNotifier`, or ``None`` when the
+         *             Twilio settings are unset on the running service.
+         *         email: Configured :class:`EmailNotifier`, or ``None`` when the
+         *             Gmail settings are unset on the running service.
          *         identity: Authenticated caller — must own the referenced contact.
          *
          *     Returns:
-         *         :class:`IssuedRequestResponse` carrying the public form URL.
+         *         :class:`IssuedRequestResponse` with the form URL and a ``sent``
+         *         flag indicating whether the notifier handoff succeeded.
          *
          *     Raises:
-         *         APIError: 404 if no contact with ``contact_id`` is owned by the caller
-         *             (this includes the case where the contact exists for a different
-         *             user — we do not leak existence across tenants).
+         *         APIError: 404 if the contact isn't owned by the caller; 503
+         *             when ``send=true`` but the matching notifier isn't
+         *             configured on this deployment; 502 when the notifier was
+         *             invoked but the upstream provider rejected the send (the
+         *             persisted request is rolled back so a retry can re-mint a
+         *             fresh token).
          */
         post: operations["issue_collection_request_collection_requests_post"];
         delete?: never;
@@ -669,6 +681,12 @@ export interface components {
              * @description Phone number (E.164) or email address the link will be sent to.
              */
             destination: string;
+            /**
+             * Send
+             * @description When true, the backend delivers the link via the matching notifier (Twilio for ``sms``, Gmail for ``email``) and only returns success once the provider acknowledges the send. When false (default), the backend just mints the link and returns the URL for the owner to deliver manually.
+             * @default false
+             */
+            send: boolean;
         };
         /**
          * IssuedRequestResponse
@@ -699,6 +717,11 @@ export interface components {
              * @description Public URL to send to the contact.
              */
             form_url: string;
+            /**
+             * Sent
+             * @description True when the backend successfully handed the link off to the configured notifier; false when ``send`` was not requested.
+             */
+            sent: boolean;
         };
         /**
          * ReadinessResponse

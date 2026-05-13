@@ -434,6 +434,31 @@ class FirestoreCollectionRequestRepository:
             owner_id=request.owner_id,
         )
 
+    async def delete(self, request_id: UUID, owner_id: str) -> bool:
+        """Delete ``request_id`` if it belongs to ``owner_id``.
+
+        Args:
+            request_id: Request UUID to delete.
+            owner_id: Firebase ``uid`` of the issuing user.
+
+        Returns:
+            ``True`` if a row was deleted, ``False`` if no such row
+            existed for that owner.
+        """
+        ref = self._doc_ref(request_id)
+        snapshot = await ref.get()
+        if not snapshot.exists:
+            return False
+        if snapshot.to_dict().get("owner_id") != owner_id:
+            return False
+        await ref.delete()
+        logger.info(
+            "collection_request_deleted",
+            request_id=str(request_id),
+            owner_id=owner_id,
+        )
+        return True
+
 
 class FirestoreUserRepository:
     """Firestore-backed :class:`~birthday_tracker.services.UserRepository`.
