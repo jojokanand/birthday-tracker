@@ -162,3 +162,133 @@ async def assert_duplicate_details_across_tenants_allowed(repo: ContactRepositor
     assert (await repo.get(mine.id, OWNER)) is not None
     assert (await repo.get(twin.id, OTHER_OWNER)) is not None
     assert mine.id != twin.id  # IDs are random UUIDs; details collide, IDs don't
+
+
+# ----- list_page / count_for_owner contract -----------------------------
+
+
+def _seedable(full_name: str, *, email: str | None, preferred: str | None = None) -> Contact:
+    """Build a contact for paging/search tests.
+
+    Default phone is ``None`` (caller supplies email) so the ``email``
+    parameter is meaningful — passing ``None`` exercises the
+    phone-only branch.
+    """
+    return Contact(
+        owner_id=OWNER,
+        full_name=full_name,
+        preferred_name=preferred,
+        email=email,
+        phone=None if email else "+14155551234",
+    )
+
+
+async def assert_list_page_orders_by_full_name_lower(repo: ContactRepository) -> None:
+    """The page is ordered case-insensitively by ``full_name``.
+
+    Specifically, "ada" sorts before "Bob" — lowercasing means the
+    capitalisation of the source field doesn't influence position.
+    """
+    await repo.save(_seedable("Bob Smith", email="b@example.com"))
+    await repo.save(_seedable("ada Lovelace", email="a@example.com"))
+
+    items, _ = await repo.list_page(OWNER, limit=10)
+    assert [c.full_name for c in items] == ["ada Lovelace", "Bob Smith"]
+
+
+async def assert_list_page_walks_via_cursor(repo: ContactRepository) -> None:
+    """Cursor pagination visits every contact exactly once."""
+    for i in range(15):
+        await repo.save(_seedable(f"User {i:02d}", email=f"u{i:02d}@example.com"))
+
+    seen: list[str] = []
+    cursor: str | None = None
+    pages = 0
+    while True:
+        items, cursor = await repo.list_page(OWNER, limit=10, cursor=cursor)
+        seen.extend(c.full_name for c in items)
+        pages += 1
+        if cursor is None:
+            break
+    assert pages == 2  # 10 + 5
+    assert sorted(seen) == [f"User {i:02d}" for i in range(15)]
+
+
+async def assert_count_for_owner_returns_total(repo: ContactRepository) -> None:
+    """``count_for_owner`` matches the number of inserted contacts."""
+    assert await repo.count_for_owner(OWNER) == 0
+    for i in range(7):
+        await repo.save(_seedable(f"User {i}", email=f"u{i}@example.com"))
+    assert await repo.count_for_owner(OWNER) == 7
+
+
+async def assert_q_prefix_matches_full_name(repo: ContactRepository) -> None:
+    """``q`` is a case-insensitive prefix on ``full_name``."""
+    await repo.save(_seedable("Ada Lovelace", email="ada@example.com"))
+    await repo.save(_seedable("Bob Smith", email="bob@example.com"))
+
+    items, _ = await repo.list_page(OWNER, limit=10, q="ad")
+    assert [c.full_name for c in items] == ["Ada Lovelace"]
+    assert await repo.count_for_owner(OWNER, q="ad") == 1
+
+
+async def assert_q_prefix_matches_preferred_name(repo: ContactRepository) -> None:
+    """``q`` matches preferred_name as well as full_name."""
+    await repo.save(_seedable("Augusta King", email="aking@example.com", preferred="Ada"))
+    await repo.save(_seedable("Bob Smith", email="bob@example.com"))
+
+    items, _ = await repo.list_page(OWNER, limit=10, q="ada")
+    assert [c.full_name for c in items] == ["Augusta King"]
+
+
+async def assert_q_prefix_matches_email(repo: ContactRepository) -> None:
+    """``q`` matches the email prefix too."""
+    await repo.save(_seedable("Marco Polo", email="ada@example.com"))
+    await repo.save(_seedable("Bob Smith", email="bob@example.com"))
+
+    items, _ = await repo.list_page(OWNER, limit=10, q="ada@")
+    assert [c.full_name for c in items] == ["Marco Polo"]
+
+
+async def assert_q_dedupes_overlapping_matches(repo: ContactRepository) -> None:
+    """A contact whose name and email both match returns once."""
+    await repo.save(_seedable("Ada Lovelace", email="ada@example.com"))
+
+    items, _ = await repo.list_page(OWNER, limit=10, q="ada")
+    assert len(items) == 1
+    assert await repo.count_for_owner(OWNER, q="ada") == 1
+
+
+async def assert_q_whitespace_only_is_no_filter(repo: ContactRepository) -> None:
+    """A whitespace-only ``q`` is treated as no filter."""
+    await repo.save(_seedable("Ada Lovelace", email="ada@example.com"))
+    await repo.save(_seedable("Bob Smith", email="bob@example.com"))
+
+    items, _ = await repo.list_page(OWNER, limit=10, q="   ")
+    assert {c.full_name for c in items} == {"Ada Lovelace", "Bob Smith"}
+
+
+async def assert_unknown_cursor_yields_empty_page(repo: ContactRepository) -> None:
+    """A cursor that doesn't exist in the filtered set returns an empty page."""
+    await repo.save(_seedable("Ada Lovelace", email="ada@example.com"))
+
+    items, next_cursor = await repo.list_page(OWNER, limit=10, cursor=str(uuid4()))
+    assert items == []
+    assert next_cursor is None
+
+
+async def assert_list_page_isolates_tenants(repo: ContactRepository) -> None:
+    """Pagination respects the owner_id filter."""
+    mine = _seedable("Mine Person", email="mine@example.com")
+    theirs = Contact(
+        owner_id=OTHER_OWNER,
+        full_name="Theirs Person",
+        email="theirs@example.com",
+    )
+    await repo.save(mine)
+    await repo.save(theirs)
+
+    items, _ = await repo.list_page(OWNER, limit=10)
+    assert [c.full_name for c in items] == ["Mine Person"]
+    assert await repo.count_for_owner(OWNER) == 1
+    assert await repo.count_for_owner(OTHER_OWNER) == 1

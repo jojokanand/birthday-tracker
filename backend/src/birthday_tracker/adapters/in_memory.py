@@ -80,6 +80,108 @@ class InMemoryContactRepository:
         """
         return [deepcopy(c) for c in self._store.values() if c.owner_id == owner_id]
 
+    def _filtered_sorted(self, owner_id: str, q: str | None) -> list[Contact]:
+        """Owner-scoped, optionally q-filtered set sorted by ``(full_name_lower, id)``.
+
+        Centralised so :meth:`list_page` and :meth:`count_for_owner` agree
+        on the filter / order in every edge case.
+
+        Args:
+            owner_id: Firebase ``uid`` of the caller.
+            q: Optional case-insensitive prefix search across the three
+                lowercase mirror fields. Whitespace-only ``q`` is treated
+                as no filter.
+
+        Returns:
+            Matching contacts (deep copies) in stable sort order.
+        """
+        normalised = (q or "").strip().lower()
+        matches = [
+            c for c in self._store.values() if c.owner_id == owner_id and _matches(c, normalised)
+        ]
+        matches.sort(key=lambda c: (c.full_name_lower, str(c.id)))
+        return [deepcopy(c) for c in matches]
+
+    async def list_page(
+        self,
+        owner_id: str,
+        *,
+        limit: int,
+        cursor: str | None = None,
+        q: str | None = None,
+    ) -> tuple[list[Contact], str | None]:
+        """Return one page of contacts for ``owner_id`` ordered by name.
+
+        Args:
+            owner_id: Firebase ``uid`` of the caller.
+            limit: Maximum items in the page.
+            cursor: ``id`` of the last contact from the previous page,
+                or ``None`` for the first page. A cursor that doesn't
+                appear in the filtered set yields an empty page (matches
+                the behaviour the router would observe if a doc was
+                deleted between requests).
+            q: Optional case-insensitive prefix search.
+
+        Returns:
+            ``(items, next_cursor)``.
+        """
+        sorted_items = self._filtered_sorted(owner_id, q)
+        start = 0
+        if cursor is not None:
+            for index, item in enumerate(sorted_items):
+                if str(item.id) == cursor:
+                    start = index + 1
+                    break
+            else:
+                return ([], None)
+        page = sorted_items[start : start + limit]
+        next_cursor = str(page[-1].id) if page and start + limit < len(sorted_items) else None
+        return (page, next_cursor)
+
+    async def count_for_owner(
+        self,
+        owner_id: str,
+        *,
+        q: str | None = None,
+    ) -> int:
+        """Return the number of contacts owned by ``owner_id`` (optionally filtered).
+
+        Args:
+            owner_id: Firebase ``uid`` of the caller.
+            q: Optional case-insensitive prefix search across the three
+                lowercase mirror fields.
+
+        Returns:
+            Total number of matching contacts.
+        """
+        return len(self._filtered_sorted(owner_id, q))
+
+
+def _matches(contact: Contact, normalised_q: str) -> bool:
+    """Return ``True`` when ``contact`` matches the normalised query string.
+
+    A blank ``normalised_q`` matches everything. Otherwise the query is a
+    case-insensitive prefix on any of ``full_name_lower``,
+    ``preferred_name_lower``, or ``email_lower``.
+
+    Args:
+        contact: Contact to test.
+        normalised_q: Already-trimmed, already-lowercased query string.
+            An empty string skips the filter.
+
+    Returns:
+        ``True`` if the contact matches.
+    """
+    if not normalised_q:
+        return True
+    if contact.full_name_lower.startswith(normalised_q):
+        return True
+    if contact.preferred_name_lower and contact.preferred_name_lower.startswith(normalised_q):
+        return True
+    if contact.email_lower and contact.email_lower.startswith(normalised_q):
+        return True
+    return False
+
 
 class InMemoryCollectionRequestRepository:
     """A :class:`~birthday_tracker.services.CollectionRequestRepository` backed by a dict.

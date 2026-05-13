@@ -168,6 +168,185 @@ class FirestoreContactRepository:
                 results.append(Contact.model_validate(data))
         return results
 
+    async def list_page(
+        self,
+        owner_id: str,
+        *,
+        limit: int,
+        cursor: str | None = None,
+        q: str | None = None,
+    ) -> tuple[list[Contact], str | None]:
+        """Return one page of contacts ordered by ``(full_name_lower, id)``.
+
+        When ``q`` is unset the page is fetched directly with
+        ``order_by + start_after + limit(N+1)`` so a single Firestore
+        query yields the page and detects whether more pages remain.
+
+        When ``q`` is set the same prefix-range filter is fanned out
+        across ``full_name_lower``, ``preferred_name_lower``, and
+        ``email_lower``. Each query returns at most a few hundred docs
+        for any reasonably specific prefix; the union is deduped by
+        ``id``, sorted in Python, and sliced to the requested page.
+
+        Composite indexes required (declared in
+        ``infra/firestore.indexes.json`` and applied on deploy):
+
+        - ``(owner_id ASC, full_name_lower ASC)`` — used for the no-q
+          path and for ``full_name_lower`` prefix search.
+        - ``(owner_id ASC, preferred_name_lower ASC)`` — for prefix
+          search on the optional preferred-name field.
+        - ``(owner_id ASC, email_lower ASC)`` — for prefix search on the
+          email field.
+
+        Args:
+            owner_id: Firebase ``uid`` of the caller.
+            limit: Maximum items in the page.
+            cursor: ``id`` of the last contact from the previous page,
+                or ``None`` for the first page.
+            q: Optional case-insensitive prefix.
+
+        Returns:
+            ``(items, next_cursor)``.
+        """
+        normalised = (q or "").strip().lower()
+        if normalised:
+            return await self._list_page_with_search(owner_id, limit, cursor, normalised)
+        return await self._list_page_no_search(owner_id, limit, cursor)
+
+    async def _list_page_no_search(
+        self, owner_id: str, limit: int, cursor: str | None
+    ) -> tuple[list[Contact], str | None]:
+        """Single-query paged read sorted by ``(full_name_lower, id)``."""
+        from google.cloud.firestore_v1.base_query import FieldFilter  # noqa: PLC0415
+
+        query = (
+            self.client.collection(self.collection_name)
+            .where(filter=FieldFilter("owner_id", "==", owner_id))
+            .order_by("full_name_lower")
+            .order_by("__name__")
+        )
+        if cursor is not None:
+            cursor_snap = await self._doc_ref_str(cursor).get()
+            if not cursor_snap.exists:
+                # Cursor refers to a deleted/never-existed doc. Match the
+                # in-memory adapter's behaviour: empty page, no next.
+                return ([], None)
+            query = query.start_after(cursor_snap)
+
+        # Fetch one extra so we can tell whether more pages remain
+        # without firing a second query.
+        query = query.limit(limit + 1)
+        items: list[Contact] = []
+        async for snapshot in query.stream():
+            data = snapshot.to_dict()
+            if data is not None:
+                items.append(Contact.model_validate(data))
+
+        has_more = len(items) > limit
+        page = items[:limit]
+        next_cursor = str(page[-1].id) if has_more and page else None
+        return (page, next_cursor)
+
+    async def _list_page_with_search(
+        self, owner_id: str, limit: int, cursor: str | None, q: str
+    ) -> tuple[list[Contact], str | None]:
+        """Fan-out prefix search → union → sort → slice."""
+        merged = await self._search_merged(owner_id, q)
+        merged.sort(key=lambda c: (c.full_name_lower, str(c.id)))
+        start = 0
+        if cursor is not None:
+            for index, item in enumerate(merged):
+                if str(item.id) == cursor:
+                    start = index + 1
+                    break
+            else:
+                return ([], None)
+        page = merged[start : start + limit]
+        next_cursor = str(page[-1].id) if page and start + limit < len(merged) else None
+        return (page, next_cursor)
+
+    async def count_for_owner(
+        self,
+        owner_id: str,
+        *,
+        q: str | None = None,
+    ) -> int:
+        """Count contacts owned by ``owner_id`` (optionally q-filtered).
+
+        With no ``q``, uses Firestore's ``count()`` aggregate (~1
+        billable query unit). With ``q`` set, falls back to the union
+        used by :meth:`list_page` since the deduped count can't be
+        derived from three independent ``count()`` aggregates.
+
+        Args:
+            owner_id: Firebase ``uid`` of the caller.
+            q: Optional case-insensitive prefix.
+
+        Returns:
+            Total number of matching contacts.
+        """
+        from google.cloud.firestore_v1.base_query import FieldFilter  # noqa: PLC0415
+
+        normalised = (q or "").strip().lower()
+        if not normalised:
+            # ``Any`` cast: the SDK's aggregation type stubs are
+            # incomplete (mypy thinks ``.get()`` is unbound), but the
+            # runtime contract is well-documented.
+            agg: Any = (
+                self.client.collection(self.collection_name)
+                .where(filter=FieldFilter("owner_id", "==", owner_id))
+                .count()
+            )
+            result = await agg.get()
+            # The aggregate returns ``[[AggregationResult]]``; pull out the
+            # single integer.
+            return int(result[0][0].value)
+        merged = await self._search_merged(owner_id, normalised)
+        return len(merged)
+
+    async def _search_merged(self, owner_id: str, q: str) -> list[Contact]:
+        r"""Run prefix queries on the three lowercase fields and dedupe by id.
+
+        Uses Firestore's prefix-query idiom: ``where(field, ">=", q)`` AND
+        ``where(field, "<", q + "")`` constrains results to keys
+        starting with ``q`` (the high sentinel is the largest BMP
+        codepoint, putting it after every plausible prefix continuation).
+
+        Args:
+            owner_id: Firebase ``uid`` of the caller.
+            q: Already-trimmed, already-lowercased prefix.
+
+        Returns:
+            Deduped contacts (one per ``id``) in arbitrary order.
+        """
+        seen: dict[UUID, Contact] = {}
+        for field in ("full_name_lower", "preferred_name_lower", "email_lower"):
+            async for snapshot in self._prefix_query(owner_id, field, q).stream():
+                data = snapshot.to_dict()
+                if data is None:
+                    continue
+                contact = Contact.model_validate(data)
+                seen[contact.id] = contact
+        return list(seen.values())
+
+    def _prefix_query(self, owner_id: str, field: str, q: str) -> Any:
+        """Build the ``owner_id == X AND field PREFIX q`` query for one field."""
+        from google.cloud.firestore_v1.base_query import FieldFilter  # noqa: PLC0415
+
+        # ```` is the largest BMP codepoint, used as the standard
+        # Firestore prefix-query sentinel.
+        return (
+            self.client.collection(self.collection_name)
+            .where(filter=FieldFilter("owner_id", "==", owner_id))
+            .where(filter=FieldFilter(field, ">=", q))
+            .where(filter=FieldFilter(field, "<", q + ""))
+            .order_by(field)
+        )
+
+    def _doc_ref_str(self, contact_id: str) -> Any:
+        """Document reference from a string id (used by cursor lookup)."""
+        return self.client.collection(self.collection_name).document(contact_id)
+
 
 class FirestoreCollectionRequestRepository:
     """Firestore-backed :class:`~birthday_tracker.services.CollectionRequestRepository`.
