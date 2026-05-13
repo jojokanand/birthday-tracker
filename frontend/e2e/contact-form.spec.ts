@@ -58,11 +58,11 @@ test.describe.serial("Contact self-serve form and dashboard", () => {
     // Greeting is rendered from the server-fetched metadata.
     await expect(page.getByText(`Hi ${greetingName}`)).toBeVisible();
 
-    // Fill the self-serve form.
+    // Fill the self-serve form. Country defaults to "US" via the form's
+    // defaultValues; the dropdown UX is exercised in the Vitest suite.
     await page.getByLabel("Full name *").fill("E2E Form Contact");
     await page.getByLabel("Street address *").fill("42 Playwright Ave");
     await page.getByLabel("City *").fill("Testville");
-    await page.getByLabel("Country code *").fill("US");
 
     const { month, day } = upcomingBirthday();
     await page.locator("#birth_month").fill(String(month));
