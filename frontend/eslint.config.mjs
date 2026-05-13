@@ -15,6 +15,9 @@ const eslintConfig = defineConfig([
     // Generated outputs:
     "docs/**",
     "lib/api-types.ts",
+    "coverage/**",
+    "test-results/**",
+    "playwright-report/**",
   ]),
 ]);
 

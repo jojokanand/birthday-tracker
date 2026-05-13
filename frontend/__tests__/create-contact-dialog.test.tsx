@@ -249,6 +249,16 @@ describe("CreateContactDialog", () => {
     });
   });
 
+  it("closes without an API call when the user cancels", () => {
+    render(<CreateContactDialog />);
+    openDialog();
+    fireEvent.change(screen.getByLabelText(/full name/i), {
+      target: { value: "Discard me" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /cancel/i }));
+    expect(mockPost).not.toHaveBeenCalled();
+  });
+
   it("renders inline validation errors for the required fields", async () => {
     render(<CreateContactDialog />);
     openDialog();
