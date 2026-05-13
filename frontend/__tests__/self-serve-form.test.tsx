@@ -19,6 +19,77 @@ vi.mock("@/lib/api", () => ({
   },
 }));
 
+// The country dropdown and address autocomplete pull in heavy deps
+// (base-ui Combobox, Google Maps SDK loader). Replace them with dumb
+// stand-ins so the form-level tests stay focused on submit semantics.
+vi.mock("@/components/country-select", () => ({
+  CountrySelect: ({
+    id,
+    value,
+    onChange,
+  }: {
+    id?: string;
+    value: string;
+    onChange: (v: string) => void;
+  }) => (
+    <input
+      id={id}
+      aria-label="Country"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+    />
+  ),
+}));
+// Two stub buttons: one that returns a place WITH a country (covers
+// the `if (place.country)` true branch) and one with the country empty
+// (covers the false branch).
+vi.mock("@/components/address-autocomplete", () => ({
+  AddressAutocomplete: ({
+    onSelect,
+  }: {
+    onSelect: (p: {
+      street1: string;
+      city: string;
+      region: string;
+      postal_code: string;
+      country: string;
+    }) => void;
+  }) => (
+    <>
+      <button
+        type="button"
+        data-testid="autocomplete-stub"
+        onClick={() =>
+          onSelect({
+            street1: "1 Place Drive",
+            city: "Townsville",
+            region: "CA",
+            postal_code: "94000",
+            country: "us",
+          })
+        }
+      >
+        Pick fake place
+      </button>
+      <button
+        type="button"
+        data-testid="autocomplete-stub-no-country"
+        onClick={() =>
+          onSelect({
+            street1: "Some Street",
+            city: "Townsville",
+            region: "",
+            postal_code: "",
+            country: "",
+          })
+        }
+      >
+        Pick fake place (no country)
+      </button>
+    </>
+  ),
+}));
+
 import { apiClient } from "@/lib/api";
 
 const mockPost = apiClient.POST as ReturnType<typeof vi.fn>;
@@ -36,7 +107,7 @@ function fillRequiredFields() {
   fireEvent.change(screen.getByLabelText(/full name/i), { target: { value: "Ada Lovelace" } });
   fireEvent.change(screen.getByLabelText(/street address/i), { target: { value: "1 Main St" } });
   fireEvent.change(screen.getByLabelText(/city/i), { target: { value: "London" } });
-  fireEvent.change(screen.getByLabelText(/country code/i), { target: { value: "GB" } });
+  fireEvent.change(screen.getByLabelText(/^country$/i), { target: { value: "GB" } });
   fireEvent.change(screen.getByLabelText(/month/i), { target: { value: "12" } });
   fireEvent.change(screen.getByLabelText(/day/i), { target: { value: "10" } });
 }
@@ -59,7 +130,7 @@ describe("SelfServeForm", () => {
     expect(screen.getByLabelText(/full name/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/street address/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/city/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/country code/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/^country$/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/month/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/day/i)).toBeInTheDocument();
   });
@@ -124,5 +195,81 @@ describe("SelfServeForm", () => {
     });
 
     expect(mockPost).not.toHaveBeenCalled();
+  });
+
+  it("submits a parsed birth_year when one is provided", async () => {
+    mockPost.mockResolvedValue({
+      response: { status: 204 },
+      data: undefined,
+      error: undefined,
+    });
+
+    renderForm();
+    fillRequiredFields();
+    // Fill the optional year — covers the non-empty branch of
+    // birth_year's setValueAs transform.
+    fireEvent.change(screen.getByLabelText(/year/i), {
+      target: { value: "1990" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /submit/i }));
+    await waitFor(() => expect(mockPost).toHaveBeenCalledTimes(1));
+    expect(mockPost.mock.calls[0][1].body.birthday.year).toBe(1990);
+  });
+
+  it("preserves the existing country when the autocomplete returns no country", async () => {
+    renderForm();
+    fireEvent.click(screen.getByTestId("autocomplete-stub-no-country"));
+    await waitFor(() =>
+      expect(
+        (screen.getByLabelText(/street address/i) as HTMLInputElement).value,
+      ).toBe("Some Street"),
+    );
+    // Default country "US" was not overwritten.
+    expect((screen.getByLabelText(/^country$/i) as HTMLInputElement).value).toBe(
+      "US",
+    );
+  });
+
+  it("populates address fields when an autocomplete suggestion is picked", async () => {
+    mockPost.mockResolvedValue({
+      response: { status: 204 },
+      data: undefined,
+      error: undefined,
+    });
+
+    renderForm();
+    fireEvent.change(screen.getByLabelText(/full name/i), {
+      target: { value: "Ada Lovelace" },
+    });
+
+    // Click the stub autocomplete; fillAddressFromPlace runs and writes
+    // into the underlying form state.
+    fireEvent.click(screen.getByTestId("autocomplete-stub"));
+
+    await waitFor(() =>
+      expect(
+        (screen.getByLabelText(/street address/i) as HTMLInputElement).value,
+      ).toBe("1 Place Drive"),
+    );
+    expect(
+      (screen.getByLabelText(/^city \*$/i) as HTMLInputElement).value,
+    ).toBe("Townsville");
+    expect((screen.getByLabelText(/^country$/i) as HTMLInputElement).value).toBe(
+      "US",
+    );
+
+    fireEvent.change(screen.getByLabelText(/month/i), { target: { value: "12" } });
+    fireEvent.change(screen.getByLabelText(/day/i), { target: { value: "10" } });
+    fireEvent.click(screen.getByRole("button", { name: /submit/i }));
+
+    await waitFor(() => expect(mockPost).toHaveBeenCalledTimes(1));
+    expect(mockPost.mock.calls[0][1].body.address).toMatchObject({
+      street1: "1 Place Drive",
+      city: "Townsville",
+      region: "CA",
+      postal_code: "94000",
+      country: "US",
+    });
   });
 });

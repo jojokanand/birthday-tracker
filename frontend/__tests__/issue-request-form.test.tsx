@@ -129,4 +129,58 @@ describe("IssueRequestForm", () => {
       ).toBeInTheDocument();
     });
   });
+
+  it("defaults the channel to sms when the pre-selected contact has only a phone", () => {
+    render(
+      <IssueRequestForm contacts={CONTACTS} initialContactId={CHARLES_ID} />,
+    );
+    // Charles has a phone but no email; the default channel should be sms.
+    const sms = screen.getByDisplayValue("sms") as HTMLInputElement;
+    expect(sms.checked).toBe(true);
+  });
+
+  it("auto-fills the destination when the user switches to the sms channel", () => {
+    const { container } = render(
+      <IssueRequestForm contacts={CONTACTS} initialContactId={ADA_ID} />,
+    );
+    const destInput = container.querySelector<HTMLInputElement>("#destination")!;
+    expect(destInput.value).toBe("ada@example.com");
+    // Switching channel for an Ada-with-no-phone selection should clear
+    // the destination (covers the `?? ""` fallback branch).
+    fireEvent.click(screen.getByDisplayValue("sms"));
+    expect(destInput.value).toBe("");
+  });
+
+  it("copies the form URL to the clipboard when 'Copy' is clicked", async () => {
+    const FORM_URL = "https://example.com/form/abc.def";
+    mockPost.mockResolvedValue({
+      data: {
+        request_id: "req-1",
+        contact_id: ADA_ID,
+        channel: "email",
+        destination: "ada@example.com",
+        expires_at: "2030-01-01T00:00:00Z",
+        form_url: FORM_URL,
+      },
+      error: undefined,
+      response: { status: 201 },
+    });
+
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    });
+
+    const { container } = render(<IssueRequestForm contacts={CONTACTS} />);
+    await fillAndSubmit(container);
+    await waitFor(() => screen.getByText(FORM_URL));
+
+    fireEvent.click(screen.getByRole("button", { name: /copy/i }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(FORM_URL));
+    // The button flips to a "Copied!" label briefly.
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /copied!/i })).toBeInTheDocument(),
+    );
+  });
 });

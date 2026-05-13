@@ -28,6 +28,8 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { AddressAutocomplete } from "@/components/address-autocomplete";
+import { CountrySelect } from "@/components/country-select";
 import { useApiClient } from "@/lib/api-client";
 
 /**
@@ -133,11 +135,35 @@ export function CreateContactDialog({
     handleSubmit,
     control,
     reset,
+    setValue,
     formState: { errors, isSubmitting },
   } = useForm<FormValues>({
     resolver: zodResolver(schema),
     defaultValues: { country: "US" },
   });
+
+  /** Push a Places result into the address fields without losing focus. */
+  const fillAddressFromPlace = React.useCallback(
+    (place: {
+      street1: string;
+      city: string;
+      region: string;
+      postal_code: string;
+      country: string;
+    }) => {
+      setValue("street1", place.street1, { shouldValidate: true });
+      setValue("city", place.city, { shouldValidate: true });
+      setValue("region", place.region);
+      setValue("postal_code", place.postal_code);
+      if (place.country) {
+        setValue("country", place.country.toUpperCase(), {
+          shouldValidate: true,
+        });
+      }
+      setAddressOpen(true);
+    },
+    [setValue],
+  );
 
   async function onSubmit(values: FormValues) {
     setServerError(null);
@@ -225,6 +251,7 @@ export function CreateContactDialog({
 
             {addressOpen && (
               <div id="address-section" className="mt-3 space-y-3">
+                <AddressAutocomplete onSelect={fillAddressFromPlace} />
                 <div className="space-y-1">
                   <Label htmlFor="street1">Street address</Label>
                   <Input id="street1" {...register("street1")} />
@@ -267,11 +294,18 @@ export function CreateContactDialog({
                     <Input id="postal_code" {...register("postal_code")} />
                   </div>
                   <div className="space-y-1">
-                    <Label htmlFor="country">Country code</Label>
-                    <Input
-                      id="country"
-                      maxLength={2}
-                      {...register("country")}
+                    <Label htmlFor="country">Country</Label>
+                    <Controller
+                      name="country"
+                      control={control}
+                      render={({ field }) => (
+                        <CountrySelect
+                          id="country"
+                          value={field.value ?? ""}
+                          onChange={field.onChange}
+                          placeholder="Select a country"
+                        />
+                      )}
                     />
                     {errors.country && (
                       <p className="text-destructive text-xs">

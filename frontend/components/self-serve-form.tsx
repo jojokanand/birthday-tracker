@@ -7,13 +7,15 @@
 "use client";
 
 import * as React from "react";
-import { useForm } from "react-hook-form";
+import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { AddressAutocomplete } from "@/components/address-autocomplete";
+import { CountrySelect } from "@/components/country-select";
 import { apiClient } from "@/lib/api";
 
 const schema = z.object({
@@ -58,11 +60,34 @@ export function SelfServeForm({ token, greetingName }: SelfServeFormProps) {
   const {
     register,
     handleSubmit,
+    control,
+    setValue,
     formState: { errors, isSubmitting },
   } = useForm<FormValues>({
     resolver: zodResolver(schema),
     defaultValues: { country: "US" },
   });
+
+  const fillAddressFromPlace = React.useCallback(
+    (place: {
+      street1: string;
+      city: string;
+      region: string;
+      postal_code: string;
+      country: string;
+    }) => {
+      setValue("street1", place.street1, { shouldValidate: true });
+      setValue("city", place.city, { shouldValidate: true });
+      setValue("region", place.region);
+      setValue("postal_code", place.postal_code);
+      if (place.country) {
+        setValue("country", place.country.toUpperCase(), {
+          shouldValidate: true,
+        });
+      }
+    },
+    [setValue],
+  );
 
   async function onSubmit(values: FormValues) {
     setServerError(null);
@@ -141,6 +166,7 @@ export function SelfServeForm({ token, greetingName }: SelfServeFormProps) {
         <h2 className="font-semibold text-sm uppercase tracking-wide text-muted-foreground">
           Mailing address
         </h2>
+        <AddressAutocomplete onSelect={fillAddressFromPlace} />
         <div className="space-y-1">
           <Label htmlFor="street1">Street address *</Label>
           <Input id="street1" {...register("street1")} />
@@ -180,8 +206,19 @@ export function SelfServeForm({ token, greetingName }: SelfServeFormProps) {
             <Input id="postal_code" {...register("postal_code")} />
           </div>
           <div className="space-y-1">
-            <Label htmlFor="country">Country code *</Label>
-            <Input id="country" maxLength={2} {...register("country")} />
+            <Label htmlFor="country">Country *</Label>
+            <Controller
+              name="country"
+              control={control}
+              render={({ field }) => (
+                <CountrySelect
+                  id="country"
+                  value={field.value ?? ""}
+                  onChange={field.onChange}
+                  placeholder="Select a country"
+                />
+              )}
+            />
             {errors.country && (
               <p className="text-destructive text-xs">
                 {errors.country.message}

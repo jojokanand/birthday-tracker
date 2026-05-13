@@ -106,6 +106,47 @@ the pattern; extend it with the same `--build-arg` flags).
 
 ---
 
+## 4b. Enable Google Places (address autocomplete)
+
+The address inputs on both the owner-side Add contact dialog and the
+contact-side self-serve form offer Google Places autocomplete. The key
+is optional — without it, the address fields render but no suggestions
+appear, so this step can be skipped on the first bootstrap and added
+later.
+
+1. **Enable the two APIs** the JS SDK needs:
+
+   ```bash
+   gcloud services enable \
+     places-backend.googleapis.com \
+     maps-backend.googleapis.com \
+     --project "$PROJECT_ID"
+   ```
+
+2. **Create an API key** and restrict it to the frontend domain so the
+   key can only be used from the dashboard:
+
+   ```bash
+   gcloud services api-keys create \
+     --display-name "Birthday Tracker — Places (frontend)" \
+     --allowed-referrers "$FRONTEND_URL/*,http://localhost:3000/*" \
+     --api-target service=places-backend.googleapis.com \
+     --api-target service=maps-backend.googleapis.com \
+     --project "$PROJECT_ID"
+   ```
+
+   Read the printed `keyString` — that's the value the frontend ships.
+
+3. **Set the GitHub Actions Variable** `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`
+   to the key. The deploy workflow already forwards it as a build arg
+   into the frontend image.
+
+> **Billing:** Places Autocomplete is metered after a free tier. Keep
+> the HTTP-referrer restriction on the key so a leaked value can't be
+> abused from another origin.
+
+---
+
 ## 5. Create the deploy service account
 
 ```bash
