@@ -41,9 +41,9 @@ test("owner creates a contact and issues a collection request", async ({
   // ── Step 8: generate the form link ───────────────────────────────────────
   await page.getByRole("button", { name: /generate form link/i }).click();
 
-  // ── Step 9: the pending form URL is shown ────────────────────────────────
+  // ── Step 9: the pending form link is shown ───────────────────────────────
   await expect(
-    page.getByText(/form url — send this to the contact/i),
+    page.getByText(/form link — send this to the contact/i),
   ).toBeVisible();
   await expect(page.getByText(/\/form\//)).toBeVisible();
 });

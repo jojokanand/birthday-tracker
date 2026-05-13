@@ -15,7 +15,12 @@ from birthday_tracker.adapters import (
     FirestoreCollectionRequestRepository,
     FirestoreContactRepository,
     FirestoreUserRepository,
+    GmailNotifier,
+    TwilioNotifier,
     build_async_client,
+    build_gmail_service,
+    build_twilio_client,
+    load_gmail_credentials,
 )
 from birthday_tracker.core.auth import Identity, dev_identity, verify_firebase_id_token
 from birthday_tracker.core.config import AppEnv, Settings
@@ -26,6 +31,7 @@ from birthday_tracker.services import (
     UserRepository,
 )
 from birthday_tracker.services.collection_requests import CollectionRequestService
+from birthday_tracker.services.notifiers import EmailNotifier, SmsNotifier
 
 
 def get_app_settings(request: Request) -> Settings:
@@ -134,6 +140,76 @@ def get_collection_request_service(
         token_ttl_seconds=settings.form_token_ttl_seconds,
         public_base_url=settings.public_base_url,
     )
+
+
+def get_sms_notifier(
+    request: Request,
+    settings: Annotated[Settings, Depends(get_app_settings)],
+) -> SmsNotifier | None:
+    """Return the configured SMS notifier, or ``None`` when Twilio is unset.
+
+    Tests override this to inject a fake; the live wiring constructs a
+    :class:`TwilioNotifier` lazily so the app boots even without Twilio
+    credentials (the dashboard half of the app doesn't need them).
+
+    Args:
+        request: Incoming request — checked for a test-time override on
+            ``app.state.sms_notifier``.
+        settings: Process settings (Twilio account SID / auth token /
+            from-number).
+
+    Returns:
+        A :class:`TwilioNotifier` when all three Twilio settings are
+        non-empty, else ``None``.
+    """
+    override = getattr(request.app.state, "sms_notifier", None)
+    if override is not None:
+        return override  # type: ignore[no-any-return]
+    if not (
+        settings.twilio_account_sid and settings.twilio_auth_token and settings.twilio_from_number
+    ):
+        return None
+    client = build_twilio_client(
+        account_sid=settings.twilio_account_sid,
+        auth_token=settings.twilio_auth_token,
+    )
+    return TwilioNotifier(client=client, from_number=settings.twilio_from_number)
+
+
+def get_email_notifier(
+    request: Request,
+    settings: Annotated[Settings, Depends(get_app_settings)],
+) -> EmailNotifier | None:
+    """Return the configured email notifier, or ``None`` when Gmail is unset.
+
+    Production loads credentials from the raw JSON in the
+    ``GMAIL_OAUTH_TOKEN`` env var (mounted by Cloud Run from Secret
+    Manager); local dev can use ``gmail_oauth_token_path`` instead.
+
+    Args:
+        request: Incoming request — checked for a test-time override on
+            ``app.state.email_notifier``.
+        settings: Process settings (Gmail OAuth token + from-address).
+
+    Returns:
+        A :class:`GmailNotifier` when ``gmail_from_address`` and one of
+        ``gmail_oauth_token`` / ``gmail_oauth_token_path`` are set,
+        else ``None``.
+    """
+    override = getattr(request.app.state, "email_notifier", None)
+    if override is not None:
+        return override  # type: ignore[no-any-return]
+    if not settings.gmail_from_address:
+        return None
+    if not (settings.gmail_oauth_token or settings.gmail_oauth_token_path):
+        return None
+    creds = load_gmail_credentials(
+        client_secrets_path=settings.gmail_oauth_client_secrets_path,
+        token_path=settings.gmail_oauth_token_path,
+        token_json=settings.gmail_oauth_token,
+    )
+    service = build_gmail_service(creds)
+    return GmailNotifier(service=service, from_address=settings.gmail_from_address)
 
 
 def get_form_rate_limiter(request: Request) -> RateLimiter:

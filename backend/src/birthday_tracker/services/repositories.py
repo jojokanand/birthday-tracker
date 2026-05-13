@@ -190,6 +190,24 @@ class CollectionRequestRepository(Protocol):
         """
         ...  # pragma: no cover
 
+    async def delete(self, request_id: UUID, owner_id: str) -> bool:
+        """Remove ``request_id`` if it is owned by ``owner_id``.
+
+        Used by ``POST /collection-requests`` to roll back a freshly-
+        persisted request when the matching notifier ``send`` call fails
+        — the contact never received the link, so leaving the row in
+        Firestore as ``pending`` would only confuse the owner later.
+
+        Args:
+            request_id: Request UUID to delete.
+            owner_id: Firebase ``uid`` of the issuing user.
+
+        Returns:
+            ``True`` if a row was deleted, ``False`` if no such request
+            existed for that owner.
+        """
+        ...  # pragma: no cover
+
 
 class UserRepository(Protocol):
     """Persistence interface for :class:`~birthday_tracker.models.User`.

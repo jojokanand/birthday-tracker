@@ -12,13 +12,7 @@
 import * as React from "react";
 import { useSearchParams } from "next/navigation";
 import { AuthGuard } from "@/components/auth-guard";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { IssueRequestForm } from "@/components/issue-request-form";
 import { useApiClient } from "@/lib/api-client";
 import { useAuth } from "@/lib/auth-context";
@@ -77,21 +71,17 @@ function NewCollectionRequestContent() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Send Form Request</h1>
+        <h1 className="text-2xl font-bold tracking-tight">
+          Ask for a birthday
+        </h1>
         <p className="text-muted-foreground text-sm mt-1">
-          Generate a secure, time-limited link and send it to a contact so they
-          can fill in their birthday and address.
+          Send a contact a one-time link they can use to fill in their
+          birthday and address. The link expires in 7 days.
         </p>
       </div>
 
       <Card className="max-w-lg">
-        <CardHeader>
-          <CardTitle>Issue collection request</CardTitle>
-          <CardDescription>
-            The link expires in 7 days and can only be used once.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
+        <CardContent className="pt-6">
           <IssueRequestForm
             contacts={contacts}
             initialContactId={initialContactId}

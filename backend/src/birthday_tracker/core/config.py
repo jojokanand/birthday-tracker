@@ -70,6 +70,15 @@ class Settings(BaseSettings):
         default="",
         description="Path where the cached OAuth refresh token is stored.",
     )
+    gmail_oauth_token: str = Field(
+        default="",
+        description=(
+            "Raw OAuth refresh-token JSON (as stored in Secret Manager / "
+            "mounted as the GMAIL_OAUTH_TOKEN env var on Cloud Run). When "
+            "set, takes precedence over ``gmail_oauth_token_path`` so the "
+            "production deployment doesn't need a writable filesystem."
+        ),
+    )
     gmail_from_address: str = Field(
         default="",
         description="Email address sent on behalf of (must match the OAuth grant).",

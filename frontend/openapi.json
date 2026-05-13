@@ -387,7 +387,7 @@
                     "collection-requests"
                 ],
                 "summary": "Issue a new collection request",
-                "description": "Mint a token and persist a pending collection request for the caller.\n\nArgs:\n    body: Request payload with ``contact_id``, ``channel``, ``destination``.\n    service: Injected :class:`CollectionRequestService`.\n    identity: Authenticated caller \u2014 must own the referenced contact.\n\nReturns:\n    :class:`IssuedRequestResponse` carrying the public form URL.\n\nRaises:\n    APIError: 404 if no contact with ``contact_id`` is owned by the caller\n        (this includes the case where the contact exists for a different\n        user \u2014 we do not leak existence across tenants).",
+                "description": "Mint a signed form token, persist the request, and optionally deliver it.\n\nArgs:\n    body: ``contact_id``, ``channel``, ``destination``, plus the\n        optional ``send`` flag.\n    service: Injected :class:`CollectionRequestService`.\n    requests: Injected :class:`CollectionRequestRepository` \u2014 used to\n        roll back the persisted request if the notifier fails so we\n        never leave a request the contact never received.\n    sms: Configured :class:`SmsNotifier`, or ``None`` when the\n        Twilio settings are unset on the running service.\n    email: Configured :class:`EmailNotifier`, or ``None`` when the\n        Gmail settings are unset on the running service.\n    identity: Authenticated caller \u2014 must own the referenced contact.\n\nReturns:\n    :class:`IssuedRequestResponse` with the form URL and a ``sent``\n    flag indicating whether the notifier handoff succeeded.\n\nRaises:\n    APIError: 404 if the contact isn't owned by the caller; 503\n        when ``send=true`` but the matching notifier isn't\n        configured on this deployment; 502 when the notifier was\n        invoked but the upstream provider rejected the send (the\n        persisted request is rolled back so a retry can re-mint a\n        fresh token).",
                 "operationId": "issue_collection_request_collection_requests_post",
                 "parameters": [
                     {
@@ -1326,6 +1326,12 @@
                         "minLength": 1,
                         "title": "Destination",
                         "description": "Phone number (E.164) or email address the link will be sent to."
+                    },
+                    "send": {
+                        "type": "boolean",
+                        "title": "Send",
+                        "description": "When true, the backend delivers the link via the matching notifier (Twilio for ``sms``, Gmail for ``email``) and only returns success once the provider acknowledges the send. When false (default), the backend just mints the link and returns the URL for the owner to deliver manually.",
+                        "default": false
                     }
                 },
                 "type": "object",
@@ -1366,6 +1372,11 @@
                         "type": "string",
                         "title": "Form Url",
                         "description": "Public URL to send to the contact."
+                    },
+                    "sent": {
+                        "type": "boolean",
+                        "title": "Sent",
+                        "description": "True when the backend successfully handed the link off to the configured notifier; false when ``send`` was not requested."
                     }
                 },
                 "type": "object",
@@ -1375,7 +1386,8 @@
                     "channel",
                     "destination",
                     "expires_at",
-                    "form_url"
+                    "form_url",
+                    "sent"
                 ],
                 "title": "IssuedRequestResponse",
                 "description": "Response body returned by ``POST /collection-requests``."

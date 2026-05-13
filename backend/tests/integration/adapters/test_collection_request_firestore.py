@@ -161,3 +161,36 @@ async def test_get_by_token_hash_is_not_owner_scoped(
     found = await request_repo.get_by_token_hash("d" * 64)
     assert found is not None
     assert found.owner_id == "someone-else"
+
+
+@pytest.mark.integration
+async def test_delete_existing_returns_true(
+    request_repo: FirestoreCollectionRequestRepository,
+) -> None:
+    """delete() removes the row and returns True (used by the send-rollback path)."""
+    req = _make_request()
+    await request_repo.save(req)
+
+    assert await request_repo.delete(req.id, OWNER) is True
+    assert await request_repo.get(req.id, OWNER) is None
+
+
+@pytest.mark.integration
+async def test_delete_missing_returns_false(
+    request_repo: FirestoreCollectionRequestRepository,
+) -> None:
+    """delete() of an unknown id is a no-op that returns False."""
+    assert await request_repo.delete(uuid.uuid4(), OWNER) is False
+
+
+@pytest.mark.integration
+async def test_delete_filters_by_owner(
+    request_repo: FirestoreCollectionRequestRepository,
+) -> None:
+    """delete() refuses to drop a request owned by a different tenant."""
+    req = _make_request(owner_id="someone-else")
+    await request_repo.save(req)
+
+    assert await request_repo.delete(req.id, OWNER) is False
+    # And the original record is still there.
+    assert await request_repo.get(req.id, "someone-else") is not None

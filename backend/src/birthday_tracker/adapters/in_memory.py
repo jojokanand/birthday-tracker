@@ -239,6 +239,32 @@ class InMemoryCollectionRequestRepository:
         self._store[request.id] = deepcopy(request)
         self._by_hash[request.token_hash] = request.id
 
+    async def delete(self, request_id: UUID, owner_id: str) -> bool:
+        """Remove ``request_id`` if it belongs to ``owner_id``.
+
+        Also drops the matching ``token_hash`` index entry so subsequent
+        lookups by token return ``None``. Wrong-owner deletes are no-ops
+        that return ``False``.
+
+        Args:
+            request_id: Request UUID to delete.
+            owner_id: Firebase ``uid`` of the issuing user.
+
+        Returns:
+            ``True`` if a request was removed, ``False`` otherwise.
+        """
+        existing = self._store.get(request_id)
+        if existing is None or existing.owner_id != owner_id:
+            return False
+        del self._store[request_id]
+        # Walk the index rather than relying on the just-deleted object's
+        # token_hash so a future change that lets owners re-issue tokens
+        # still cleans up correctly.
+        for token_hash, rid in list(self._by_hash.items()):
+            if rid == request_id:
+                del self._by_hash[token_hash]
+        return True
+
 
 class InMemoryUserRepository:
     """A :class:`~birthday_tracker.services.UserRepository` backed by a dict.
