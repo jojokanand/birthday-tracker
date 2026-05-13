@@ -295,6 +295,101 @@ describe("CreateContactDialog", () => {
     );
   });
 
+  it("posts a birthday when the optional section is filled in", async () => {
+    render(<CreateContactDialog />);
+    openDialog();
+    fireEvent.change(screen.getByLabelText(/full name/i), {
+      target: { value: "Ada Lovelace" },
+    });
+    fireEvent.change(screen.getByLabelText(/^email$/i), {
+      target: { value: "ada@example.com" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /add birthday/i }));
+    fireEvent.change(screen.getByLabelText(/^month$/i), {
+      target: { value: "12" },
+    });
+    fireEvent.change(screen.getByLabelText(/^day$/i), {
+      target: { value: "10" },
+    });
+    fireEvent.change(screen.getByLabelText(/^year/i), {
+      target: { value: "1990" },
+    });
+
+    clickSave();
+    await waitFor(() => expect(mockPost).toHaveBeenCalledTimes(1));
+    expect(mockPost.mock.calls[0][1].body.birthday).toEqual({
+      month: 12,
+      day: 10,
+      year: 1990,
+    });
+  });
+
+  it("rejects an impossible birthday (Feb 30) client-side and never POSTs", async () => {
+    render(<CreateContactDialog />);
+    openDialog();
+    fireEvent.change(screen.getByLabelText(/full name/i), {
+      target: { value: "Ada Lovelace" },
+    });
+    fireEvent.change(screen.getByLabelText(/^email$/i), {
+      target: { value: "ada@example.com" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /add birthday/i }));
+    fireEvent.change(screen.getByLabelText(/^month$/i), {
+      target: { value: "2" },
+    });
+    fireEvent.change(screen.getByLabelText(/^day$/i), {
+      target: { value: "30" },
+    });
+
+    clickSave();
+    await waitFor(() =>
+      expect(
+        screen.getByText(/birthday needs both month and day/i),
+      ).toBeInTheDocument(),
+    );
+    expect(mockPost).not.toHaveBeenCalled();
+  });
+
+  it("rejects month-only birthday (no day)", async () => {
+    render(<CreateContactDialog />);
+    openDialog();
+    fireEvent.change(screen.getByLabelText(/full name/i), {
+      target: { value: "Ada Lovelace" },
+    });
+    fireEvent.change(screen.getByLabelText(/^email$/i), {
+      target: { value: "ada@example.com" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /add birthday/i }));
+    fireEvent.change(screen.getByLabelText(/^month$/i), {
+      target: { value: "5" },
+    });
+
+    clickSave();
+    await waitFor(() =>
+      expect(
+        screen.getByText(/birthday needs both month and day/i),
+      ).toBeInTheDocument(),
+    );
+    expect(mockPost).not.toHaveBeenCalled();
+  });
+
+  it("posts birthday: null when the section is left empty", async () => {
+    render(<CreateContactDialog />);
+    openDialog();
+    fireEvent.change(screen.getByLabelText(/full name/i), {
+      target: { value: "Ada Lovelace" },
+    });
+    fireEvent.change(screen.getByLabelText(/^email$/i), {
+      target: { value: "ada@example.com" },
+    });
+    clickSave();
+    await waitFor(() => expect(mockPost).toHaveBeenCalledTimes(1));
+    expect(mockPost.mock.calls[0][1].body.birthday).toBeNull();
+  });
+
   it("re-opens the address section when the autocomplete fires while collapsed", async () => {
     render(<CreateContactDialog />);
     openDialog();
