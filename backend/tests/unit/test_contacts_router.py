@@ -280,7 +280,7 @@ async def test_list_cursor_pages_through_full_set_without_overlap() -> None:
     cursor: str | None = None
     pages = 0
     while True:
-        params = {"limit": 10}
+        params: dict[str, str | int] = {"limit": 10}
         if cursor:
             params["cursor"] = cursor
         body = client.get("/contacts", params=params).json()
