@@ -7,7 +7,7 @@
 import React from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
-import { SelfServeForm } from "@/components/self-serve-form";
+import { SelfServeForm, messageForError } from "@/components/self-serve-form";
 
 // ---------------------------------------------------------------------------
 // Mock the API client
@@ -120,6 +120,38 @@ function renderForm() {
 // Tests
 // ---------------------------------------------------------------------------
 
+describe("messageForError", () => {
+  it.each([
+    [410, undefined, /already been used or has expired/i],
+    [404, undefined, /this form link is invalid/i],
+    [500, undefined, /something went wrong/i],
+    [undefined, undefined, /something went wrong/i],
+  ])("status %s -> friendly fallback message", (status, error, expected) => {
+    expect(messageForError(status, error)).toMatch(expected);
+  });
+
+  it("returns the first 422 detail with the 'Value error' prefix stripped", () => {
+    const msg = messageForError(422, {
+      errors: [
+        { loc: ["body", "birthday"], msg: "Value error, invalid birthday: 02-29" },
+      ],
+    });
+    expect(msg).toBe("invalid birthday: 02-29");
+  });
+
+  it.each<[string, unknown]>([
+    ["non-object error", "boom"],
+    ["null error", null],
+    ["missing errors array", { detail: "huh" }],
+    ["empty errors array", { errors: [] }],
+    ["first entry not an object", { errors: ["nope"] }],
+    ["first entry missing msg", { errors: [{ loc: ["body"] }] }],
+    ["first entry msg is blank", { errors: [{ msg: "   " }] }],
+  ])("falls back to the generic message when 422 detail is unusable (%s)", (_, error) => {
+    expect(messageForError(422, error)).toMatch(/something went wrong/i);
+  });
+});
+
 describe("SelfServeForm", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -148,6 +180,109 @@ describe("SelfServeForm", () => {
 
     await waitFor(() => {
       expect(screen.getByText(/thank you, ada/i)).toBeInTheDocument();
+    });
+  });
+
+  it("rejects Feb 29 in a non-leap year client-side and never calls the API", async () => {
+    renderForm();
+    fillRequiredFields();
+    // Override the month/day picked by fillRequiredFields with an
+    // impossible date for a non-leap year.
+    fireEvent.change(screen.getByLabelText(/month/i), { target: { value: "2" } });
+    fireEvent.change(screen.getByLabelText(/day/i), { target: { value: "29" } });
+    fireEvent.change(screen.getByLabelText(/year/i), {
+      target: { value: "1991" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /submit/i }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/February 29 doesn't exist in 1991/i),
+      ).toBeInTheDocument();
+    });
+    expect(mockPost).not.toHaveBeenCalled();
+  });
+
+  it("allows Feb 29 when no year is provided (leap-year probe)", async () => {
+    mockPost.mockResolvedValue({
+      response: { status: 204 },
+      data: undefined,
+      error: undefined,
+    });
+
+    renderForm();
+    fillRequiredFields();
+    fireEvent.change(screen.getByLabelText(/month/i), { target: { value: "2" } });
+    fireEvent.change(screen.getByLabelText(/day/i), { target: { value: "29" } });
+
+    fireEvent.click(screen.getByRole("button", { name: /submit/i }));
+    await waitFor(() => expect(mockPost).toHaveBeenCalledTimes(1));
+    expect(mockPost.mock.calls[0][1].body.birthday).toEqual({
+      month: 2,
+      day: 29,
+      year: null,
+    });
+  });
+
+  it("surfaces the FastAPI 422 detail when the backend rejects the submission", async () => {
+    mockPost.mockResolvedValue({
+      response: { status: 422 },
+      data: undefined,
+      error: {
+        title: "Request validation failed",
+        status: 422,
+        errors: [
+          {
+            loc: ["body", "birthday"],
+            msg: "Value error, invalid birthday: 02-29",
+            type: "value_error",
+          },
+        ],
+      },
+    });
+
+    renderForm();
+    fillRequiredFields();
+    fireEvent.click(screen.getByRole("button", { name: /submit/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/invalid birthday: 02-29/i)).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/something went wrong/i)).not.toBeInTheDocument();
+  });
+
+  it("shows the 'invalid link' message on 404 response", async () => {
+    mockPost.mockResolvedValue({
+      response: { status: 404 },
+      data: undefined,
+      error: { title: "Form not found", status: 404 },
+    });
+
+    renderForm();
+    fillRequiredFields();
+    fireEvent.click(screen.getByRole("button", { name: /submit/i }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/this form link is invalid/i),
+      ).toBeInTheDocument();
+    });
+  });
+
+  it("falls back to the generic message on 422 with no usable detail", async () => {
+    mockPost.mockResolvedValue({
+      response: { status: 422 },
+      data: undefined,
+      error: { title: "Request validation failed", status: 422 },
+    });
+
+    renderForm();
+    fillRequiredFields();
+    fireEvent.click(screen.getByRole("button", { name: /submit/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/something went wrong/i)).toBeInTheDocument();
     });
   });
 

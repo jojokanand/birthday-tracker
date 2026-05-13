@@ -18,24 +18,107 @@ import { AddressAutocomplete } from "@/components/address-autocomplete";
 import { CountrySelect } from "@/components/country-select";
 import { apiClient } from "@/lib/api";
 
-const schema = z.object({
-  full_name: z.string().min(1, "Required"),
-  preferred_name: z.string().optional(),
-  street1: z.string().min(1, "Required"),
-  street2: z.string().optional(),
-  city: z.string().min(1, "Required"),
-  region: z.string().optional(),
-  postal_code: z.string().optional(),
-  country: z.string().length(2, "2-letter ISO code (e.g. US, GB)").toUpperCase(),
-  birth_month: z.number({ message: "Required" }).int().min(1).max(12),
-  birth_day: z.number({ message: "Required" }).int().min(1).max(31),
-  birth_year: z
-    .number()
-    .int()
-    .min(1900)
-    .max(new Date().getFullYear())
-    .optional(),
-});
+/**
+ * Map a failed `POST /form/{token}` response to the message we render at
+ * the bottom of the form.
+ *
+ * The backend wraps validation failures in problem+json with a top-level
+ * `errors: [{loc, msg, type}]` array (see
+ * `birthday_tracker.api.errors.validation_exception_handler`). For 422s
+ * we surface the first message verbatim (stripping Pydantic's
+ * `"Value error, "` prefix). Other statuses get fixed copy.
+ */
+export function messageForError(
+  status: number | undefined,
+  error: unknown,
+): string {
+  if (status === 410) {
+    return "This form link has already been used or has expired.";
+  }
+  if (status === 404) {
+    return "This form link is invalid. Please double-check the URL.";
+  }
+  if (status === 422) {
+    const detail = extractValidationMessage(error);
+    if (detail) return detail;
+  }
+  return "Something went wrong. Please try again.";
+}
+
+/**
+ * Pull the first human-readable validation message out of a problem+json
+ * error body. Returns `null` when the body has no usable message — in
+ * that case the caller should fall back to a generic line.
+ */
+function extractValidationMessage(error: unknown): string | null {
+  if (!error || typeof error !== "object") return null;
+  const errors = (error as { errors?: unknown }).errors;
+  if (!Array.isArray(errors) || errors.length === 0) return null;
+  const first = errors[0];
+  if (!first || typeof first !== "object") return null;
+  const msg = (first as { msg?: unknown }).msg;
+  if (typeof msg !== "string" || !msg.trim()) return null;
+  // Pydantic prefixes `model_validator` failures with "Value error, ".
+  // Strip it so the message reads naturally to the contact.
+  return msg.replace(/^Value error,\s*/, "");
+}
+
+const MONTH_NAMES = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+];
+
+const schema = z
+  .object({
+    full_name: z.string().min(1, "Required"),
+    preferred_name: z.string().optional(),
+    street1: z.string().min(1, "Required"),
+    street2: z.string().optional(),
+    city: z.string().min(1, "Required"),
+    region: z.string().optional(),
+    postal_code: z.string().optional(),
+    country: z.string().length(2, "2-letter ISO code (e.g. US, GB)").toUpperCase(),
+    birth_month: z.number({ message: "Required" }).int().min(1).max(12),
+    birth_day: z.number({ message: "Required" }).int().min(1).max(31),
+    birth_year: z
+      .number()
+      .int()
+      .min(1900)
+      .max(new Date().getFullYear())
+      .optional(),
+  })
+  .superRefine((d, ctx) => {
+    // Per-field rules above already flag missing/out-of-range values;
+    // only run the cross-field real-date probe when month and day are
+    // both present and individually valid. Probe with a leap year
+    // (2000) when birth_year is omitted so 02-29 is allowed without a
+    // year.
+    const m = d.birth_month;
+    const dy = d.birth_day;
+    if (typeof m !== "number" || typeof dy !== "number") return;
+    if (m < 1 || m > 12 || dy < 1 || dy > 31) return;
+    const probeYear = d.birth_year ?? 2000;
+    const probe = new Date(probeYear, m - 1, dy);
+    if (probe.getMonth() !== m - 1 || probe.getDate() !== dy) {
+      const monthLabel = MONTH_NAMES[m - 1] ?? `month ${m}`;
+      const yearSuffix = d.birth_year ? ` in ${d.birth_year}` : "";
+      ctx.addIssue({
+        code: "custom",
+        path: ["birthday"],
+        message: `${monthLabel} ${dy} doesn't exist${yearSuffix}. Pick a valid date.`,
+      });
+    }
+  });
 
 type FormValues = z.infer<typeof schema>;
 
@@ -67,6 +150,14 @@ export function SelfServeForm({ token, greetingName }: SelfServeFormProps) {
     resolver: zodResolver(schema),
     defaultValues: { country: "US" },
   });
+
+  // Cross-field date error attaches to a synthetic ``birthday`` path so
+  // it doesn't collide with the per-field "Required" / out-of-range
+  // messages on month/day/year. react-hook-form stores it under the
+  // same name; the type cast just acknowledges that it isn't a real
+  // field on ``FormValues``.
+  const birthdayError = (errors as Record<string, { message?: string }>)
+    .birthday?.message;
 
   const fillAddressFromPlace = React.useCallback(
     (place: {
@@ -112,11 +203,7 @@ export function SelfServeForm({ token, greetingName }: SelfServeFormProps) {
       },
     });
     if (error) {
-      if (response?.status === 410) {
-        setServerError("This form link has already been used or has expired.");
-      } else {
-        setServerError("Something went wrong. Please try again.");
-      }
+      setServerError(messageForError(response?.status, error));
       return;
     }
     setSubmitted(true);
@@ -282,6 +369,10 @@ export function SelfServeForm({ token, greetingName }: SelfServeFormProps) {
             />
           </div>
         </div>
+        {/* Cross-field date error (e.g. Feb 29 in a non-leap year). */}
+        {birthdayError && (
+          <p className="text-destructive text-xs">{birthdayError}</p>
+        )}
       </section>
 
       {serverError && (
