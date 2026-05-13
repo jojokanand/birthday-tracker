@@ -254,6 +254,18 @@ export function IssueRequestForm({
 
       {serverError && <p className="text-destructive text-sm">{serverError}</p>}
 
+      {/* SMS sending is gated off until Twilio is provisioned end-to-
+          end. The Generate button is the workaround — owner copies
+          the link out and texts it themselves. Backend still accepts
+          ``send=true`` for SMS, so re-enabling here is one diff. */}
+      {channel === "sms" && (
+        <p className="text-muted-foreground text-xs">
+          SMS sending is temporarily disabled. Use{" "}
+          <span className="font-medium">Generate form link</span> to
+          mint a link you can text yourself.
+        </p>
+      )}
+
       <div className="flex flex-wrap items-center gap-2">
         <Button
           type="button"
@@ -263,14 +275,16 @@ export function IssueRequestForm({
         >
           {pendingMode === "generate" ? "Generating…" : "Generate form link"}
         </Button>
-        <Button
-          type="button"
-          disabled={pendingMode !== null}
-          onClick={handleSubmit((v) => submit(v, true))}
-        >
-          <Send className="size-4" aria-hidden />
-          {pendingMode === "send" ? "Sending…" : sendButtonLabel}
-        </Button>
+        {channel === "email" && (
+          <Button
+            type="button"
+            disabled={pendingMode !== null}
+            onClick={handleSubmit((v) => submit(v, true))}
+          >
+            <Send className="size-4" aria-hidden />
+            {pendingMode === "send" ? "Sending…" : sendButtonLabel}
+          </Button>
+        )}
       </div>
 
       {/* Result */}
