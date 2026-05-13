@@ -17,13 +17,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { ChevronLeft, ChevronRight, Pencil, Search, Trash2, Users } from "lucide-react";
 import { AuthGuard } from "@/components/auth-guard";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import {
   Table,
@@ -267,7 +261,11 @@ function ContactsContent() {
         </div>
       </div>
 
-      {loading ? (
+      {/* Show the spinner-style line only on the very first paint —
+          subsequent refreshes (search keystrokes, page navigation,
+          create/edit/delete) keep the table mounted with the previous
+          rows so the column headers don't flash. */}
+      {loading && lastCompletedKey === null ? (
         <div className="text-sm text-muted-foreground">Loading…</div>
       ) : total === 0 ? (
         <Card>
@@ -282,22 +280,18 @@ function ContactsContent() {
         </Card>
       ) : (
         <Card>
-          <CardHeader>
-            <CardTitle>All contacts</CardTitle>
-            <CardDescription>
-              Click &ldquo;Send Request&rdquo; to issue a collection-request form
-              link for any contact.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="p-0">
-            <Table>
+          <CardContent
+            className="p-0"
+            aria-busy={loading}
+          >
+            <Table className={loading ? "opacity-60 transition-opacity" : ""}>
               <TableHeader>
                 <TableRow>
                   <TableHead>Name</TableHead>
                   <TableHead>Email / Phone</TableHead>
                   <TableHead>Birthday</TableHead>
                   <TableHead>Address</TableHead>
-                  <TableHead />
+                  <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -322,7 +316,7 @@ function ContactsContent() {
                         : "—"}
                     </TableCell>
                     <TableCell>
-                      <div className="flex items-center gap-1">
+                      <div className="flex items-center justify-end gap-1">
                         <Button
                           variant="ghost"
                           size="icon"
