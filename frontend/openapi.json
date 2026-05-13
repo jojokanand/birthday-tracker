@@ -1,8 +1,8 @@
 {
     "openapi": "3.1.0",
     "info": {
-        "title": "Birthday Tracker API",
-        "description": "Backend for the Birthday Tracker. Manages contacts, collection requests, and outbound SMS/email notifications.",
+        "title": "Birthday Genie API",
+        "description": "Backend for Birthday Genie. Manages contacts, collection requests, and outbound SMS/email notifications.",
         "version": "0.1.0"
     },
     "paths": {

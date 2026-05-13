@@ -85,7 +85,7 @@ class IssuedRequestResponse(BaseModel):
     )
 
 
-_PRODUCT_NAME = "Birthday-Tracker"
+_PRODUCT_NAME = "Birthday Genie"
 _OWNER_FALLBACK = "Someone"
 _CONTACT_FALLBACK = "there"
 

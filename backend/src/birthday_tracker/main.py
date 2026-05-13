@@ -44,10 +44,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     logger = get_logger(__name__)
 
     app = FastAPI(
-        title="Birthday Tracker API",
+        title="Birthday Genie API",
         version=__version__,
         description=(
-            "Backend for the Birthday Tracker. Manages contacts, collection "
+            "Backend for Birthday Genie. Manages contacts, collection "
             "requests, and outbound SMS/email notifications."
         ),
         docs_url="/docs",

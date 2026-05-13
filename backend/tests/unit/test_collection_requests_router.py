@@ -491,7 +491,7 @@ def test_owner_first_name_falls_back_to_someone_when_missing() -> None:
 def test_email_subject_mentions_product_and_owner() -> None:
     """Subject must identify both the sender and the product."""
     subject = _email_subject("Jyothsna")
-    assert "Birthday-Tracker" in subject
+    assert "Birthday Genie" in subject
     assert "Jyothsna" in subject
 
 
@@ -508,7 +508,7 @@ def test_email_body_html_contains_required_bits() -> None:
     assert "Jyothsna" in html
     assert 'href="https://example.com/form/tok">link</a>' in html
     assert 'href="https://example.com/">Sign up here</a>' in html
-    assert "<strong>Birthday-Tracker</strong>" in html
+    assert "<strong>Birthday Genie</strong>" in html
 
 
 @pytest.mark.unit
@@ -521,7 +521,7 @@ def test_email_body_text_mirrors_the_html_content() -> None:
         sign_up_url="https://example.com/",
     )
     assert "Hi Ada!" in text
-    assert "Jyothsna is using Birthday-Tracker" in text
+    assert "Jyothsna is using Birthday Genie" in text
     assert "https://example.com/form/tok" in text
     assert "https://example.com/" in text
     assert "<" not in text  # no stray HTML
@@ -558,7 +558,7 @@ def test_send_true_email_uses_personalised_subject_and_body() -> None:
     call_kwargs = email.send.await_args.kwargs
     # Subject mentions the product + owner (dev identity is "Dev User"
     # → first token "Dev").
-    assert "Birthday-Tracker" in call_kwargs["subject"]
+    assert "Birthday Genie" in call_kwargs["subject"]
     assert "Dev" in call_kwargs["subject"]
     # HTML body greets the contact by first name.
     assert "Hi Ada!" in call_kwargs["html"]

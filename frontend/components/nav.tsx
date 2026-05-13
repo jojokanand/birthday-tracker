@@ -32,7 +32,7 @@ export function Nav() {
           className="flex items-center gap-2 text-sm font-semibold tracking-tight"
         >
           <Cake className="size-5 text-primary" />
-          Birthday Tracker
+          Birthday Genie
         </Link>
         {isAuthed && !isSignIn && (
           <nav className="flex items-center gap-4 text-sm text-muted-foreground">

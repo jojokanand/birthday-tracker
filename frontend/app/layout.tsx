@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Birthday Tracker",
+  title: "Birthday Genie",
   description: "Keep track of the people you care about.",
 };
 
