@@ -150,10 +150,9 @@ def _email_body_html(
         "If the link doesn't open, copy and paste this URL into your "
         f"browser:<br/>{form_url}</p>"
         '<hr style="border:0;border-top:1px solid #eee;margin:24px 0"/>'
-        '<p style="font-size:0.9em">'
+        "<p>"
         f"Interested in checking out {_PRODUCT_NAME}? "
         f'<a href="{sign_up_url}">Sign up here</a>.</p>'
-        "<p>Thanks!</p>"
     )
 
 
@@ -174,8 +173,7 @@ def _email_body_text(
         f"{form_url}\n\n"
         "—\n\n"
         f"Interested in checking out {_PRODUCT_NAME}? Sign up here:\n"
-        f"{sign_up_url}\n\n"
-        "Thanks!\n"
+        f"{sign_up_url}\n"
     )
 
 
