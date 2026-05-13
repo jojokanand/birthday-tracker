@@ -321,6 +321,31 @@ describe("ContactsPage pagination controls", () => {
     );
   });
 
+  it("keeps the table mounted with stale rows while a refetch is in flight", async () => {
+    // First fetch resolves immediately so the table mounts with rows.
+    mockGet.mockResolvedValueOnce(envelope(PAGE_1, 25, "id-09"));
+    // Second fetch (triggered by Next click) hangs so the page is in
+    // the loading-with-existing-data state when we make assertions.
+    mockGet.mockReturnValueOnce(new Promise(() => {}));
+
+    render(<ContactsPage />);
+    await waitFor(() =>
+      expect(screen.getByText(/page 1 of 3/i)).toBeInTheDocument(),
+    );
+
+    fireEvent.click(screen.getByLabelText(/next page/i));
+
+    // The previous page's column headers and rows are still on screen
+    // — i.e. we haven't unmounted the table while waiting for the
+    // next response. ``aria-busy="true"`` signals the in-flight state
+    // without remounting.
+    expect(screen.getByText(/^name$/i)).toBeInTheDocument();
+    expect(screen.getByText("User 00")).toBeInTheDocument();
+    expect(
+      document.querySelector('[aria-busy="true"]'),
+    ).toBeInTheDocument();
+  });
+
   it("treats an API error as zero results", async () => {
     mockGet.mockResolvedValueOnce({
       data: undefined,
