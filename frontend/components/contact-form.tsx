@@ -26,7 +26,10 @@ import { AddressAutocomplete } from "@/components/address-autocomplete";
 import { CountrySelect } from "@/components/country-select";
 import type { ContactResponse } from "@/lib/format";
 
-/** Form schema. See in-line comment on the address cross-field rule. */
+/** Current full year — used as the upper bound for the birth-year input. */
+const CURRENT_YEAR = new Date().getFullYear();
+
+/** Form schema. See in-line comments on the cross-field rules. */
 const schema = z
   .object({
     full_name: z.string().min(1, "Required"),
@@ -49,6 +52,13 @@ const schema = z
       .refine((v) => !v || /^[A-Za-z]{2}$/.test(v), {
         message: "2-letter ISO code (e.g. US, GB)",
       }),
+    // All three birthday inputs are optional at the form level. The
+    // cross-field rule below requires both month and day if either is
+    // provided, and rejects impossible dates (Feb 29 in a non-leap
+    // year, Apr 31, etc.).
+    birth_month: z.number().int().min(1).max(12).optional(),
+    birth_day: z.number().int().min(1).max(31).optional(),
+    birth_year: z.number().int().min(1900).max(CURRENT_YEAR).optional(),
   })
   .refine((d) => d.email || d.phone, {
     message: "Provide at least one of email or phone",
@@ -70,6 +80,27 @@ const schema = z
         "Address needs at least street, city, and country (or leave it blank)",
       path: ["street1"],
     },
+  )
+  .refine(
+    (d) => {
+      const m = d.birth_month;
+      const dy = d.birth_day;
+      const y = d.birth_year;
+      const anySet = m !== undefined || dy !== undefined || y !== undefined;
+      if (!anySet) return true;
+      if (m === undefined || dy === undefined) return false;
+      // Probe a real Date to reject impossible combinations such as
+      // Feb 30 or Feb 29 in a non-leap year. When ``year`` is missing,
+      // 2000 (a leap year) lets ``02-29`` through.
+      const probeYear = y ?? 2000;
+      const probe = new Date(probeYear, m - 1, dy);
+      return probe.getMonth() === m - 1 && probe.getDate() === dy;
+    },
+    {
+      message:
+        "Birthday needs both month and day, and must be a real date.",
+      path: ["birth_month"],
+    },
   );
 
 /** Validated form values (also the shape the form returns to its parent). */
@@ -88,6 +119,11 @@ export interface ContactBody {
     region: string | null;
     postal_code: string | null;
     country: string;
+  } | null;
+  birthday: {
+    month: number;
+    day: number;
+    year: number | null;
   } | null;
 }
 
@@ -120,6 +156,14 @@ export function buildBody(values: ContactFormValues): ContactBody {
           country: (values.country ?? "").toUpperCase(),
         }
       : null,
+    birthday:
+      values.birth_month !== undefined && values.birth_day !== undefined
+        ? {
+            month: values.birth_month,
+            day: values.birth_day,
+            year: values.birth_year ?? null,
+          }
+        : null,
   };
 }
 
@@ -141,6 +185,9 @@ export function defaultsFromContact(c: ContactResponse): Partial<ContactFormValu
     region: c.address?.region ?? "",
     postal_code: c.address?.postal_code ?? "",
     country: c.address?.country ?? "US",
+    birth_month: c.birthday?.month,
+    birth_day: c.birthday?.day,
+    birth_year: c.birthday?.year ?? undefined,
   };
 }
 
@@ -169,10 +216,16 @@ export function ContactForm({
   // Open the address section by default when editing a contact that
   // already has an address — they almost certainly want to see those
   // values without an extra click.
-  const initiallyOpen = Boolean(
+  const addressInitiallyOpen = Boolean(
     defaults?.street1 || defaults?.city || defaults?.postal_code,
   );
-  const [addressOpen, setAddressOpen] = React.useState(initiallyOpen);
+  const [addressOpen, setAddressOpen] = React.useState(addressInitiallyOpen);
+  const birthdayInitiallyOpen = Boolean(
+    defaults?.birth_month !== undefined ||
+      defaults?.birth_day !== undefined ||
+      defaults?.birth_year !== undefined,
+  );
+  const [birthdayOpen, setBirthdayOpen] = React.useState(birthdayInitiallyOpen);
 
   const {
     register,
@@ -336,6 +389,74 @@ export function ContactForm({
                 )}
               </div>
             </div>
+          </div>
+        )}
+      </div>
+
+      {/* --- Optional birthday section ----------------------------- */}
+      <div className="border-t pt-3">
+        <button
+          type="button"
+          onClick={() => setBirthdayOpen((v) => !v)}
+          className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+          aria-expanded={birthdayOpen}
+          aria-controls="birthday-section"
+        >
+          {birthdayOpen ? "− Hide birthday" : "+ Add birthday (optional)"}
+        </button>
+
+        {birthdayOpen && (
+          <div id="birthday-section" className="mt-3 grid grid-cols-3 gap-3">
+            <div className="space-y-1">
+              <Label htmlFor="birth_month">Month</Label>
+              <Input
+                id="birth_month"
+                type="number"
+                min={1}
+                max={12}
+                placeholder="MM"
+                {...register("birth_month", {
+                  setValueAs: (v: string) =>
+                    v === "" ? undefined : parseInt(v, 10),
+                })}
+              />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="birth_day">Day</Label>
+              <Input
+                id="birth_day"
+                type="number"
+                min={1}
+                max={31}
+                placeholder="DD"
+                {...register("birth_day", {
+                  setValueAs: (v: string) =>
+                    v === "" ? undefined : parseInt(v, 10),
+                })}
+              />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="birth_year">
+                Year{" "}
+                <span className="text-muted-foreground font-normal">(opt.)</span>
+              </Label>
+              <Input
+                id="birth_year"
+                type="number"
+                min={1900}
+                max={CURRENT_YEAR}
+                placeholder="YYYY"
+                {...register("birth_year", {
+                  setValueAs: (v: string) =>
+                    v === "" ? undefined : parseInt(v, 10),
+                })}
+              />
+            </div>
+            {errors.birth_month && (
+              <p className="text-destructive text-xs col-span-3">
+                {errors.birth_month.message}
+              </p>
+            )}
           </div>
         )}
       </div>

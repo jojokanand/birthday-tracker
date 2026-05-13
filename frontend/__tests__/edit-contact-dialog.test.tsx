@@ -149,6 +149,55 @@ describe("EditContactDialog", () => {
     expect(onSaved).not.toHaveBeenCalled();
   });
 
+  it("pre-fills the birthday inputs from contact.birthday", () => {
+    render(
+      <EditContactDialog
+        contact={{
+          ...BASE_CONTACT,
+          birthday: { month: 12, day: 10, year: 1990 },
+        }}
+        open
+        onOpenChange={() => {}}
+      />,
+    );
+    // Birthday section auto-expands when the contact already has one.
+    expect((screen.getByLabelText(/^month$/i) as HTMLInputElement).value).toBe(
+      "12",
+    );
+    expect((screen.getByLabelText(/^day$/i) as HTMLInputElement).value).toBe(
+      "10",
+    );
+    expect((screen.getByLabelText(/^year/i) as HTMLInputElement).value).toBe(
+      "1990",
+    );
+  });
+
+  it("PUTs an updated birthday", async () => {
+    const onSaved = vi.fn();
+    render(
+      <EditContactDialog
+        contact={{
+          ...BASE_CONTACT,
+          birthday: { month: 1, day: 1, year: 1990 },
+        }}
+        open
+        onOpenChange={() => {}}
+        onSaved={onSaved}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText(/^year/i), {
+      target: { value: "2000" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
+
+    await waitFor(() => expect(mockPut).toHaveBeenCalledTimes(1));
+    expect(mockPut.mock.calls[0][1].body.birthday).toEqual({
+      month: 1,
+      day: 1,
+      year: 2000,
+    });
+  });
+
   it("flattens an existing address into the form so it's pre-filled", () => {
     render(
       <EditContactDialog
