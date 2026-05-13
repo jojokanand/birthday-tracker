@@ -406,6 +406,88 @@ def test_update_returns_404_for_unknown_id() -> None:
     assert resp.json()["title"] == "Contact not found"
 
 
+@pytest.mark.unit
+async def test_update_with_address_round_trips_as_typed_pydantic() -> None:
+    """Regression for #35: PUT with an ``address`` body must 200, and the
+    saved contact's ``address`` must be an ``Address`` instance — not a
+    plain ``dict`` left over from ``model_copy(update=...)``.
+
+    Before the fix this returned 500 with a
+    ``PydanticSerializationUnexpectedValue`` error in the response.
+    """
+    from birthday_tracker.models import Address
+
+    repo = InMemoryContactRepository()
+    contact = await _seed(repo, full_name="Sid Anand", email="sid@example.com")
+    client = _build_client(repo)
+
+    resp = client.put(
+        f"/contacts/{contact.id}",
+        json={
+            "address": {
+                "street1": "4217 Stewart Ln",
+                "city": "Santa Clara",
+                "region": "CA",
+                "postal_code": "95054-4157",
+                "country": "US",
+            },
+        },
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["address"]["street1"] == "4217 Stewart Ln"
+
+    # The repository round-trip must preserve the typed nested model.
+    stored = await repo.get(contact.id, DEV_OWNER)
+    assert stored is not None
+    assert isinstance(stored.address, Address)
+
+
+@pytest.mark.unit
+async def test_update_with_birthday_round_trips_as_typed_pydantic() -> None:
+    """Same regression as above, applied to the ``birthday`` field."""
+    from birthday_tracker.models.birthday import Birthday
+
+    repo = InMemoryContactRepository()
+    contact = await _seed(repo, full_name="Sid Anand", email="sid@example.com")
+    client = _build_client(repo)
+
+    resp = client.put(
+        f"/contacts/{contact.id}",
+        json={"birthday": {"month": 5, "day": 21, "year": 1975}},
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["birthday"] == {"month": 5, "day": 21, "year": 1975}
+
+    stored = await repo.get(contact.id, DEV_OWNER)
+    assert stored is not None
+    assert isinstance(stored.birthday, Birthday)
+
+
+@pytest.mark.unit
+async def test_update_can_clear_an_optional_field() -> None:
+    """Sending ``preferred_name: null`` clears the value."""
+    repo = InMemoryContactRepository()
+    contact = await _seed(
+        repo,
+        full_name="Sid Anand",
+        email="sid@example.com",
+        preferred_name="Sid",
+    )
+    client = _build_client(repo)
+
+    resp = client.put(f"/contacts/{contact.id}", json={"preferred_name": None})
+
+    assert resp.status_code == 200
+    assert resp.json()["preferred_name"] is None
+    stored = await repo.get(contact.id, DEV_OWNER)
+    assert stored is not None
+    assert stored.preferred_name is None
+
+
 # ---------------------------------------------------------------------------
 # DELETE /contacts/{contact_id}
 # ---------------------------------------------------------------------------
