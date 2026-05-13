@@ -149,3 +149,126 @@ def test_prod_valid_token_returns_profile() -> None:
     body = resp.json()
     assert body["id"] == "firebase-uid-123"
     assert body["email"] == "real@example.com"
+
+
+# ---------------------------------------------------------------------------
+# Identity-derived fields on the /me response
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_get_me_dev_mode_includes_default_first_last_name() -> None:
+    """Dev identity supplies display_name 'Dev User' → first/last = Dev / User."""
+    repo = InMemoryUserRepository()
+    client = _build_dev_client(repo)
+
+    body = client.get("/me").json()
+    assert body["first_name"] == "Dev"
+    assert body["last_name"] == "User"
+    # No phone on the dev identity → null on the wire.
+    assert body["phone"] is None
+
+
+@pytest.mark.unit
+def test_get_me_splits_multi_token_display_name() -> None:
+    """A three-token display name keeps the first as ``first_name`` and joins the rest."""
+    repo = InMemoryUserRepository()
+    client = _build_prod_client(repo)
+
+    ident = Identity(
+        user_id="firebase-uid-123",
+        email="real@example.com",
+        display_name="Ada Augusta Lovelace",
+    )
+    with patch(
+        "birthday_tracker.api.dependencies.verify_firebase_id_token",
+        return_value=ident,
+    ):
+        body = client.get("/me", headers={"Authorization": "Bearer t"}).json()
+
+    assert body["first_name"] == "Ada"
+    assert body["last_name"] == "Augusta Lovelace"
+
+
+@pytest.mark.unit
+def test_get_me_single_token_display_name_has_null_last_name() -> None:
+    """A one-token display name fills first_name and leaves last_name null."""
+    repo = InMemoryUserRepository()
+    client = _build_prod_client(repo)
+
+    ident = Identity(
+        user_id="firebase-uid-123",
+        email="real@example.com",
+        display_name="Cher",
+    )
+    with patch(
+        "birthday_tracker.api.dependencies.verify_firebase_id_token",
+        return_value=ident,
+    ):
+        body = client.get("/me", headers={"Authorization": "Bearer t"}).json()
+
+    assert body["first_name"] == "Cher"
+    assert body["last_name"] is None
+
+
+@pytest.mark.unit
+def test_get_me_missing_display_name_yields_null_first_and_last() -> None:
+    """No display_name on the identity → first_name and last_name are both null."""
+    repo = InMemoryUserRepository()
+    client = _build_prod_client(repo)
+
+    ident = Identity(
+        user_id="firebase-uid-123",
+        email="real@example.com",
+        display_name=None,
+    )
+    with patch(
+        "birthday_tracker.api.dependencies.verify_firebase_id_token",
+        return_value=ident,
+    ):
+        body = client.get("/me", headers={"Authorization": "Bearer t"}).json()
+
+    assert body["first_name"] is None
+    assert body["last_name"] is None
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("display_name", "expected"),
+    [
+        (None, (None, None)),
+        ("", (None, None)),
+        ("   ", (None, None)),
+        ("Cher", ("Cher", None)),
+        ("Ada Lovelace", ("Ada", "Lovelace")),
+        ("  Ada   Augusta Lovelace ", ("Ada", "Augusta Lovelace")),
+    ],
+)
+def test_split_display_name(
+    display_name: str | None, expected: tuple[str | None, str | None]
+) -> None:
+    """Direct unit test of the splitter so the table is easy to extend."""
+    from birthday_tracker.api.users import _split_display_name  # noqa: PLC0415
+
+    assert _split_display_name(display_name) == expected
+
+
+@pytest.mark.unit
+def test_get_me_surfaces_phone_number_when_present() -> None:
+    """When the Firebase token carries ``phone_number`` it reaches the wire."""
+    repo = InMemoryUserRepository()
+    client = _build_prod_client(repo)
+
+    ident = Identity(
+        user_id="firebase-uid-123",
+        email="real@example.com",
+        display_name="Ada Lovelace",
+        phone_number="+14155551234",
+    )
+    with patch(
+        "birthday_tracker.api.dependencies.verify_firebase_id_token",
+        return_value=ident,
+    ):
+        body = client.get("/me", headers={"Authorization": "Bearer t"}).json()
+
+    assert body["phone"] == "+14155551234"

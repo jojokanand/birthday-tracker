@@ -8,7 +8,8 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Cake } from "lucide-react";
+import { Cake, Settings } from "lucide-react";
+import { Menu } from "@base-ui/react/menu";
 import { SignOutButton } from "@/components/sign-out-button";
 import { useAuth } from "@/lib/auth-context";
 
@@ -52,10 +53,47 @@ export function Nav() {
             </Link>
           </nav>
         )}
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-2">
+          {isAuthed && !isSignIn && <SettingsMenu />}
           <SignOutButton />
         </div>
       </div>
     </header>
+  );
+}
+
+/**
+ * Gear-icon dropdown next to the sign-out button.
+ *
+ * Currently exposes a single item — **Account** — linking to
+ * `/account`. The menu is structured so adding further entries
+ * (Preferences, Billing, etc.) is just another `Menu.LinkItem`.
+ */
+function SettingsMenu() {
+  return (
+    <Menu.Root>
+      <Menu.Trigger
+        aria-label="Settings"
+        className="inline-flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
+      >
+        <Settings className="size-4" />
+      </Menu.Trigger>
+      <Menu.Portal>
+        <Menu.Positioner sideOffset={6} align="end">
+          <Menu.Popup className="rounded-lg border border-border bg-popover py-1 text-sm shadow-md outline-none">
+            <Menu.Item
+              render={
+                <Link
+                  href="/account"
+                  className="flex w-full cursor-pointer items-center px-3 py-1.5 hover:bg-muted focus:bg-muted outline-none"
+                >
+                  Account
+                </Link>
+              }
+            />
+          </Menu.Popup>
+        </Menu.Positioner>
+      </Menu.Portal>
+    </Menu.Root>
   );
 }

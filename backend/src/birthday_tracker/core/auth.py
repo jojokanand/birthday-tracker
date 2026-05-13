@@ -30,17 +30,23 @@ class Identity:
             claim (populated by Google sign-in). ``None`` for legacy
             accounts that have no name on file. Optional so the dev
             identity can omit it without breaking type checking.
+        phone_number: E.164 phone number from the Firebase
+            ``phone_number`` claim, when the account has one linked.
+            ``None`` for Google-sign-in-only accounts (this app's
+            current default).
     """
 
     user_id: str
     email: str
     display_name: str | None = None
+    phone_number: str | None = None
 
 
 _DEV_IDENTITY = Identity(
     user_id="dev-user",
     email="dev@example.com",
     display_name="Dev User",
+    phone_number=None,
 )
 
 _firebase_init_lock = threading.Lock()
@@ -120,4 +126,14 @@ def verify_firebase_id_token(token: str) -> Identity:
     # absent so downstream code can fall back gracefully.
     raw_name = decoded.get("name")
     display_name = raw_name if isinstance(raw_name, str) and raw_name.strip() else None
-    return Identity(user_id=uid, email=email, display_name=display_name)
+    # ``phone_number`` is only present when the account has linked a
+    # phone provider (which Google sign-in alone doesn't do). Same
+    # blank / non-string handling as ``name``.
+    raw_phone = decoded.get("phone_number")
+    phone_number = raw_phone if isinstance(raw_phone, str) and raw_phone.strip() else None
+    return Identity(
+        user_id=uid,
+        email=email,
+        display_name=display_name,
+        phone_number=phone_number,
+    )
