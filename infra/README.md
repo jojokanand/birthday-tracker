@@ -68,29 +68,110 @@ The backend uses three top-level collections — `contacts`, `collection_request
 and `users` — keyed by UUID / Firebase uid.
 
 **Composite indexes** for the contacts list page (paged + searchable) live in
-[`infra/firestore.indexes.json`](firestore.indexes.json). Apply them with the
-Firebase CLI:
+[`infra/firestore.indexes.json`](firestore.indexes.json). Apply them with
+`gcloud` (no separate `firebase login` flow needed — uses the same project
+auth as the rest of this guide):
 
 ```bash
-# One-time per project: install firebase-tools and pick the project.
-npm install -g firebase-tools
-firebase login
-firebase use "$PROJECT_ID"
+gcloud firestore indexes composite create \
+  --collection-group=contacts --query-scope=COLLECTION \
+  --field-config field-path=owner_id,order=ascending \
+  --field-config field-path=full_name_lower,order=ascending \
+  --project "$PROJECT_ID"
 
-# Deploy the indexes (idempotent — re-running with no changes is a no-op).
-firebase deploy --only firestore:indexes --config <(cat <<EOF
-{
-  "firestore": {
-    "indexes": "infra/firestore.indexes.json",
-    "rules": "/dev/null"
-  }
-}
-EOF
-)
+gcloud firestore indexes composite create \
+  --collection-group=contacts --query-scope=COLLECTION \
+  --field-config field-path=owner_id,order=ascending \
+  --field-config field-path=preferred_name_lower,order=ascending \
+  --project "$PROJECT_ID"
+
+gcloud firestore indexes composite create \
+  --collection-group=contacts --query-scope=COLLECTION \
+  --field-config field-path=owner_id,order=ascending \
+  --field-config field-path=email_lower,order=ascending \
+  --project "$PROJECT_ID"
+
+# Wait for all to reach READY (small datasets: seconds; large: minutes).
+gcloud firestore indexes composite list --project "$PROJECT_ID"
 ```
+
+Idempotent: `create` for an existing index returns `ALREADY_EXISTS`, harmless.
 
 The other owner-scoped queries (single-field `owner_id == X`) use indexes that
 Firestore creates automatically on first write.
+
+---
+
+## Out-of-band deploy steps
+
+The deploy workflow in [`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml)
+runs automatically on every push to `main` and rolls out both Cloud Run
+services within ~2-3 minutes. Anything that the new code depends on
+(indexes, schema-shape changes, env vars) must be in place **before the
+auto-deploy puts the new code in production**, otherwise users see a
+broken page during the gap.
+
+The PR template's *Pre-merge deploy steps* checklist points at this
+playbook. Two recurring patterns:
+
+### A. New Firestore composite index
+
+Symptom if missed: queries that use the index return
+`FAILED_PRECONDITION (the query requires an index)` and the page 5xx's
+the moment the new revision serves traffic.
+
+```bash
+# 1. BEFORE merging the PR, deploy the index from the PR's
+#    infra/firestore.indexes.json (use the gcloud commands above).
+# 2. Wait until READY:
+gcloud firestore indexes composite list --project "$PROJECT_ID"
+# 3. Merge the PR. Auto-deploy puts the new code live; queries succeed.
+```
+
+### B. New denormalized field that queries read
+
+Pattern: a PR adds a field that's written on every `save()` and read by
+new queries (e.g. `full_name_lower` introduced for the contacts search
+in #39). New writes are fine; existing documents need a one-shot
+backfill, otherwise they don't appear in queries that select on the
+new field.
+
+The PR ships an idempotent script under [`backend/scripts/`](../backend/scripts/).
+For example, `backfill_contact_lowercase.py` from #39:
+
+```bash
+# One-time ADC setup if not already done. Browser flow.
+gcloud auth application-default login
+gcloud auth application-default set-quota-project "$PROJECT_ID"
+
+# Dry-run BEFORE merging to see what'll change against live data.
+cd backend
+GOOGLE_CLOUD_PROJECT="$PROJECT_ID" \
+  uv run python -m scripts.backfill_contact_lowercase --dry-run
+
+# Apply BEFORE merging the PR (the new code path doesn't break old
+# docs, but they will be invisible until the backfill runs).
+GOOGLE_CLOUD_PROJECT="$PROJECT_ID" \
+  uv run python -m scripts.backfill_contact_lowercase
+```
+
+Backfill scripts must be idempotent — running them again on the same
+data should be a no-op so retries are safe.
+
+### C. New env var or Cloud Run setting
+
+Apply with `gcloud run services update --set-env-vars` (or `--set-secrets`)
+before merging, then record the variable in this README so future bootstraps
+pick it up. The deploy workflow does **not** read env-var lists from the
+repo — it preserves whatever's set on the service.
+
+### When in doubt
+
+Run the deploy workflow against a scratch project first, or `gcloud run
+deploy --tag` the new revision without pointing traffic at it. If the
+indexes / data / config are missing, the new revision will surface the
+problem on smoke-test traffic (`?revision_tag=…` URL) without affecting
+live users.
 
 ---
 
