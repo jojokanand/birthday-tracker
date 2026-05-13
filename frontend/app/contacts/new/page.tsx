@@ -55,9 +55,14 @@ function NewCollectionRequestContent() {
     if (!isAuthed) return;
     let alive = true;
     (async () => {
-      const { data, error } = await api.GET("/contacts", {});
+      // Pull a generous page so the contact picker still sees the
+      // whole address book until the contacts list grows its own
+      // pagination story.
+      const { data, error } = await api.GET("/contacts", {
+        params: { query: { limit: 100 } },
+      });
       if (!alive) return;
-      setContacts(error ? [] : (data ?? []));
+      setContacts(error ? [] : (data?.items ?? []));
       setLoading(false);
     })();
     return () => {

@@ -124,14 +124,14 @@ def test_days_until_birthday_leap_day_non_leap_year() -> None:
 
 
 @pytest.mark.unit
-async def test_list_empty_returns_empty_array() -> None:
-    """Empty repo → 200 with []."""
+async def test_list_empty_returns_empty_page() -> None:
+    """Empty repo → 200 with an empty paginated envelope."""
     repo = InMemoryContactRepository()
     client = _build_client(repo)
 
     resp = client.get("/contacts")
     assert resp.status_code == 200
-    assert resp.json() == []
+    assert resp.json() == {"items": [], "next_cursor": None, "total": 0}
 
 
 @pytest.mark.unit
@@ -146,13 +146,16 @@ async def test_list_returns_contacts_sorted_by_name() -> None:
     resp = client.get("/contacts")
 
     assert resp.status_code == 200
-    names = [c["full_name"] for c in resp.json()]
+    body = resp.json()
+    names = [c["full_name"] for c in body["items"]]
     assert names == ["Ada Lovelace", "Marco Polo", "Zelda Smith"]
+    assert body["total"] == 3
+    assert body["next_cursor"] is None  # only 3 items, fits in default page of 10
 
 
 @pytest.mark.unit
 async def test_list_response_shape() -> None:
-    """Response carries all expected ContactResponse fields."""
+    """Response carries all expected ContactResponse fields, wrapped in the page envelope."""
     repo = InMemoryContactRepository()
     await _seed(repo, full_name="Ada Lovelace", email="ada@example.com")
 
@@ -160,7 +163,9 @@ async def test_list_response_shape() -> None:
     resp = client.get("/contacts")
 
     assert resp.status_code == 200
-    body = resp.json()[0]
+    envelope = resp.json()
+    assert set(envelope.keys()) == {"items", "next_cursor", "total"}
+    body = envelope["items"][0]
     for key in (
         "id",
         "full_name",
@@ -204,10 +209,12 @@ async def test_list_upcoming_filters_by_birthday() -> None:
     resp = client.get("/contacts?upcoming_in_days=10")
 
     assert resp.status_code == 200
-    names = [c["full_name"] for c in resp.json()]
+    body = resp.json()
+    names = [c["full_name"] for c in body["items"]]
     assert "Soon Person" in names
     assert "Far Person" not in names
     assert "No Birthday" not in names
+    assert body["total"] == 1
 
 
 @pytest.mark.unit
@@ -234,8 +241,144 @@ async def test_list_upcoming_sorted_by_days() -> None:
     client = _build_client(repo)
     resp = client.get("/contacts?upcoming_in_days=30")
 
-    names = [c["full_name"] for c in resp.json()]
+    names = [c["full_name"] for c in resp.json()["items"]]
     assert names.index("Day 2") < names.index("Day 5")
+
+
+# ---------------------------------------------------------------------------
+# GET /contacts — pagination
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+async def test_list_default_limit_is_ten_with_next_cursor() -> None:
+    """With 25 contacts and the default ``limit``, the first page returns 10 items and a cursor."""
+    repo = InMemoryContactRepository()
+    for i in range(25):
+        await _seed(repo, full_name=f"User {i:02d}", email=f"u{i:02d}@example.com")
+
+    client = _build_client(repo)
+    resp = client.get("/contacts")
+    body = resp.json()
+
+    assert len(body["items"]) == 10
+    assert body["total"] == 25
+    assert body["next_cursor"] is not None
+    # Cursor is the id of the last item in the page.
+    assert body["next_cursor"] == body["items"][-1]["id"]
+
+
+@pytest.mark.unit
+async def test_list_cursor_pages_through_full_set_without_overlap() -> None:
+    """Walking via ``next_cursor`` visits every contact exactly once."""
+    repo = InMemoryContactRepository()
+    for i in range(25):
+        await _seed(repo, full_name=f"User {i:02d}", email=f"u{i:02d}@example.com")
+
+    client = _build_client(repo)
+    seen_ids: list[str] = []
+    cursor: str | None = None
+    pages = 0
+    while True:
+        params: dict[str, str | int] = {"limit": 10}
+        if cursor:
+            params["cursor"] = cursor
+        body = client.get("/contacts", params=params).json()
+        seen_ids.extend(item["id"] for item in body["items"])
+        pages += 1
+        cursor = body["next_cursor"]
+        if cursor is None:
+            break
+
+    assert pages == 3  # 10 + 10 + 5
+    assert len(seen_ids) == 25
+    assert len(set(seen_ids)) == 25  # no overlap
+
+
+@pytest.mark.unit
+async def test_list_last_page_has_no_next_cursor() -> None:
+    """The final page returns ``next_cursor: null``."""
+    repo = InMemoryContactRepository()
+    for i in range(15):
+        await _seed(repo, full_name=f"User {i:02d}", email=f"u{i:02d}@example.com")
+
+    client = _build_client(repo)
+    first = client.get("/contacts", params={"limit": 10}).json()
+    second = client.get("/contacts", params={"limit": 10, "cursor": first["next_cursor"]}).json()
+
+    assert len(second["items"]) == 5
+    assert second["next_cursor"] is None
+
+
+@pytest.mark.unit
+async def test_list_limit_param_respected() -> None:
+    """An explicit ``limit`` overrides the default page size."""
+    repo = InMemoryContactRepository()
+    for i in range(5):
+        await _seed(repo, full_name=f"User {i}", email=f"u{i}@example.com")
+
+    client = _build_client(repo)
+    body = client.get("/contacts", params={"limit": 2}).json()
+
+    assert len(body["items"]) == 2
+    assert body["total"] == 5
+    assert body["next_cursor"] is not None
+
+
+@pytest.mark.unit
+async def test_list_limit_out_of_range_is_rejected() -> None:
+    """``limit`` outside 1..100 → 422."""
+    repo = InMemoryContactRepository()
+    client = _build_client(repo)
+
+    assert client.get("/contacts", params={"limit": 0}).status_code == 422
+    assert client.get("/contacts", params={"limit": 101}).status_code == 422
+
+
+@pytest.mark.unit
+async def test_list_unknown_cursor_returns_400() -> None:
+    """A cursor that doesn't match any current item → 400 problem+json."""
+    repo = InMemoryContactRepository()
+    await _seed(repo, full_name="Real Person", email="r@example.com")
+
+    client = _build_client(repo)
+    resp = client.get("/contacts", params={"cursor": str(uuid4())})
+
+    assert resp.status_code == 400
+    assert resp.json()["title"] == "Invalid pagination cursor"
+
+
+@pytest.mark.unit
+async def test_list_upcoming_with_cursor_paginates() -> None:
+    """Pagination works when the upcoming filter is active."""
+    repo = InMemoryContactRepository()
+    today = dt.date.today()
+    # 12 contacts spread across the next two weeks.
+    for i in range(12):
+        d = today + dt.timedelta(days=i + 1)
+        await _seed(
+            repo,
+            full_name=f"User {i:02d}",
+            email=f"u{i:02d}@example.com",
+            birthday=Birthday(month=d.month, day=d.day),
+        )
+
+    client = _build_client(repo)
+    first = client.get("/contacts", params={"upcoming_in_days": 30, "limit": 10}).json()
+    assert len(first["items"]) == 10
+    assert first["total"] == 12
+    assert first["next_cursor"] is not None
+
+    second = client.get(
+        "/contacts",
+        params={
+            "upcoming_in_days": 30,
+            "limit": 10,
+            "cursor": first["next_cursor"],
+        },
+    ).json()
+    assert len(second["items"]) == 2
+    assert second["next_cursor"] is None
 
 
 # ---------------------------------------------------------------------------
@@ -534,7 +677,7 @@ async def test_list_omits_other_users_contacts() -> None:
 
     client = _build_client(repo)  # default dev identity
     resp = client.get("/contacts")
-    names = [c["full_name"] for c in resp.json()]
+    names = [c["full_name"] for c in resp.json()["items"]]
     assert names == ["Mine"]
 
 

@@ -1,1023 +1,1614 @@
 {
-  "openapi": "3.1.0",
-  "info": {
-    "title": "Birthday Tracker API",
-    "description": "Backend for the Birthday Tracker. Manages contacts, collection requests, and outbound SMS/email notifications.",
-    "version": "0.1.0"
-  },
-  "paths": {
-    "/health": {
-      "get": {
-        "tags": [
-          "health"
-        ],
-        "summary": "Liveness probe",
-        "description": "Return a static liveness payload.\n\nReturns:\n    A :class:`HealthResponse` indicating the service is up. Does not check\n    downstream dependencies on purpose \u2014 readiness checks belong in a\n    separate endpoint that we will add when wiring Firestore.",
-        "operationId": "get_health_health_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HealthResponse"
-                }
-              }
-            }
-          }
-        }
-      }
+    "openapi": "3.1.0",
+    "info": {
+        "title": "Birthday Tracker API",
+        "description": "Backend for the Birthday Tracker. Manages contacts, collection requests, and outbound SMS/email notifications.",
+        "version": "0.1.0"
     },
-    "/ready": {
-      "get": {
-        "tags": [
-          "health"
-        ],
-        "summary": "Readiness probe (pings Firestore)",
-        "description": "Return readiness state, including a live Firestore ping.\n\nArgs:\n    response: Injected so we can flip the status code to 503 when the\n        downstream check fails without raising.\n    settings: Process settings (project ID, optional emulator host).\n\nReturns:\n    :class:`ReadinessResponse` describing the outcome. The HTTP status is\n    200 when ready, 503 otherwise.",
-        "operationId": "get_ready_ready_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReadinessResponse"
+    "paths": {
+        "/health": {
+            "get": {
+                "tags": [
+                    "health"
+                ],
+                "summary": "Liveness probe",
+                "description": "Return a static liveness payload.\n\nReturns:\n    A :class:`HealthResponse` indicating the service is up. Does not check\n    downstream dependencies on purpose \u2014 readiness checks belong in a\n    separate endpoint that we will add when wiring Firestore.",
+                "operationId": "get_health_health_get",
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HealthResponse"
+                                }
+                            }
+                        }
+                    }
                 }
-              }
             }
-          },
-          "503": {
-            "description": "Firestore unreachable"
-          }
-        }
-      }
-    },
-    "/contacts": {
-      "get": {
-        "tags": [
-          "contacts"
-        ],
-        "summary": "List all contacts (owner only)",
-        "description": "Return all contacts, optionally filtered to upcoming birthdays.\n\nArgs:\n    repo: Injected :class:`ContactRepository`.\n    _owner: Authenticated owner identity (stub).\n    upcoming_in_days: Optional filter: only contacts with a birthday\n        within the next ``upcoming_in_days`` calendar days are returned.\n        Contacts without a birthday are omitted when this filter is active.\n\nReturns:\n    List of :class:`ContactResponse` objects, ordered by\n    ``days_until_birthday`` when ``upcoming_in_days`` is set, otherwise\n    by ascending ``full_name``.",
-        "operationId": "list_contacts_contacts_get",
-        "parameters": [
-          {
-            "name": "upcoming_in_days",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "integer",
-                  "maximum": 365,
-                  "minimum": 0
+        },
+        "/ready": {
+            "get": {
+                "tags": [
+                    "health"
+                ],
+                "summary": "Readiness probe (pings Firestore)",
+                "description": "Return readiness state, including a live Firestore ping.\n\nArgs:\n    response: Injected so we can flip the status code to 503 when the\n        downstream check fails without raising.\n    settings: Process settings (project ID, optional emulator host).\n\nReturns:\n    :class:`ReadinessResponse` describing the outcome. The HTTP status is\n    200 when ready, 503 otherwise.",
+                "operationId": "get_ready_ready_get",
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ReadinessResponse"
+                                }
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Firestore unreachable"
+                    }
+                }
+            }
+        },
+        "/contacts": {
+            "get": {
+                "tags": [
+                    "contacts"
+                ],
+                "summary": "List the caller's contacts (paginated)",
+                "description": "Return one page of the authenticated user's contacts.\n\nArgs:\n    repo: Injected :class:`ContactRepository`.\n    identity: Authenticated caller \u2014 scopes the listing to their data.\n    upcoming_in_days: Optional filter: only contacts with a birthday\n        within the next ``upcoming_in_days`` calendar days are returned.\n        Contacts without a birthday are omitted when this filter is active.\n    limit: Page size; defaults to 10, capped at 100.\n    cursor: Opaque cursor returned by a previous request; resume after\n        the contact with that ``id`` in the route's sort order.\n\nReturns:\n    A :class:`ContactsPage` with the page items, the next cursor (or\n    ``None`` if exhausted), and the total count of items matching the\n    current filter (used by the UI for ``Page X of Y``).\n\nRaises:\n    APIError: 400 when ``cursor`` does not refer to any item in the\n        current filtered set \u2014 the client likely raced a delete or\n        sent a stale URL; treat this as a recoverable error and reset\n        paging.",
+                "operationId": "list_contacts_contacts_get",
+                "parameters": [
+                    {
+                        "name": "upcoming_in_days",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "integer",
+                                    "maximum": 365,
+                                    "minimum": 0
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "description": "When set, return only contacts whose birthday falls within the next *N* days (inclusive). Contacts without a birthday are excluded.",
+                            "title": "Upcoming In Days"
+                        },
+                        "description": "When set, return only contacts whose birthday falls within the next *N* days (inclusive). Contacts without a birthday are excluded."
+                    },
+                    {
+                        "name": "limit",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "integer",
+                            "maximum": 100,
+                            "minimum": 1,
+                            "description": "Maximum number of items to return in this page.",
+                            "default": 10,
+                            "title": "Limit"
+                        },
+                        "description": "Maximum number of items to return in this page."
+                    },
+                    {
+                        "name": "cursor",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "description": "Opaque pagination cursor \u2014 the ``id`` of the last item from the previous page. Items strictly after that position in the route's sort order are returned.",
+                            "title": "Cursor"
+                        },
+                        "description": "Opaque pagination cursor \u2014 the ``id`` of the last item from the previous page. Items strictly after that position in the route's sort order are returned."
+                    },
+                    {
+                        "name": "authorization",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "default": "",
+                            "title": "Authorization"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ContactsPage"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "post": {
+                "tags": [
+                    "contacts"
+                ],
+                "summary": "Create a new contact",
+                "description": "Persist a new contact owned by the authenticated user.\n\nArgs:\n    body: Contact creation payload (must not include ``owner_id``).\n    repo: Injected :class:`ContactRepository`.\n    identity: Authenticated caller \u2014 assigned as the contact's owner.\n\nReturns:\n    The newly created :class:`ContactResponse`.\n\nRaises:\n    APIError: 422 if the body is invalid (handled by FastAPI before this\n        function is called).",
+                "operationId": "create_contact_contacts_post",
+                "parameters": [
+                    {
+                        "name": "authorization",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "default": "",
+                            "title": "Authorization"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/CreateContactBody"
+                            }
+                        }
+                    }
                 },
-                {
-                  "type": "null"
+                "responses": {
+                    "201": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ContactResponse"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
                 }
-              ],
-              "description": "When set, return only contacts whose birthday falls within the next *N* days (inclusive). Contacts without a birthday are excluded.",
-              "title": "Upcoming In Days"
+            }
+        },
+        "/contacts/{contact_id}": {
+            "get": {
+                "tags": [
+                    "contacts"
+                ],
+                "summary": "Fetch a single contact",
+                "description": "Return the contact with the given ID if owned by the caller.\n\nArgs:\n    contact_id: UUID of the contact to fetch.\n    repo: Injected :class:`ContactRepository`.\n    identity: Authenticated caller.\n\nReturns:\n    The :class:`ContactResponse` for the matching contact.\n\nRaises:\n    APIError: 404 if no contact with ``contact_id`` exists *for this\n        owner* \u2014 a wrong-owner mismatch is indistinguishable from\n        absence on purpose, so callers cannot probe for cross-tenant\n        existence.",
+                "operationId": "get_contact_contacts__contact_id__get",
+                "parameters": [
+                    {
+                        "name": "contact_id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "format": "uuid",
+                            "title": "Contact Id"
+                        }
+                    },
+                    {
+                        "name": "authorization",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "default": "",
+                            "title": "Authorization"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ContactResponse"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
             },
-            "description": "When set, return only contacts whose birthday falls within the next *N* days (inclusive). Contacts without a birthday are excluded."
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/ContactResponse"
-                  },
-                  "title": "Response List Contacts Contacts Get"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      },
-      "post": {
-        "tags": [
-          "contacts"
-        ],
-        "summary": "Create a new contact (owner only)",
-        "description": "Persist a new contact and return the saved record.\n\nArgs:\n    body: Contact creation payload.\n    repo: Injected :class:`ContactRepository`.\n    _owner: Authenticated owner identity (stub).\n\nReturns:\n    The newly created :class:`ContactResponse`.\n\nRaises:\n    APIError: 422 if the body is invalid (handled by FastAPI before this\n        function is called).",
-        "operationId": "create_contact_contacts_post",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateContactBody"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ContactResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/contacts/{contact_id}": {
-      "get": {
-        "tags": [
-          "contacts"
-        ],
-        "summary": "Fetch a single contact (owner only)",
-        "description": "Return the contact with the given ID.\n\nArgs:\n    contact_id: UUID of the contact to fetch.\n    repo: Injected :class:`ContactRepository`.\n    _owner: Authenticated owner identity (stub).\n\nReturns:\n    The :class:`ContactResponse` for the matching contact.\n\nRaises:\n    APIError: 404 if no contact with ``contact_id`` exists.",
-        "operationId": "get_contact_contacts__contact_id__get",
-        "parameters": [
-          {
-            "name": "contact_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "title": "Contact Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ContactResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      },
-      "put": {
-        "tags": [
-          "contacts"
-        ],
-        "summary": "Update a contact (owner only)",
-        "description": "Apply a partial update to an existing contact.\n\nOnly fields explicitly included in ``body`` are changed; omitted fields\nretain their current values.\n\nArgs:\n    contact_id: UUID of the contact to update.\n    body: Partial update payload.\n    repo: Injected :class:`ContactRepository`.\n    _owner: Authenticated owner identity (stub).\n\nReturns:\n    The updated :class:`ContactResponse`.\n\nRaises:\n    APIError: 404 if no contact with ``contact_id`` exists.",
-        "operationId": "update_contact_contacts__contact_id__put",
-        "parameters": [
-          {
-            "name": "contact_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "title": "Contact Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UpdateContactBody"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ContactResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      },
-      "delete": {
-        "tags": [
-          "contacts"
-        ],
-        "summary": "Delete a contact (owner only)",
-        "description": "Remove a contact permanently.\n\nArgs:\n    contact_id: UUID of the contact to delete.\n    repo: Injected :class:`ContactRepository`.\n    _owner: Authenticated owner identity (stub).\n\nRaises:\n    APIError: 404 if no contact with ``contact_id`` exists.",
-        "operationId": "delete_contact_contacts__contact_id__delete",
-        "parameters": [
-          {
-            "name": "contact_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "title": "Contact Id"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Successful Response"
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/collection-requests": {
-      "post": {
-        "tags": [
-          "collection-requests"
-        ],
-        "summary": "Issue a new collection request (owner only)",
-        "description": "Mint a token and persist a pending collection request.\n\nArgs:\n    body: Request payload with ``contact_id``, ``channel``, ``destination``.\n    service: Injected :class:`CollectionRequestService`.\n    _owner: Authenticated owner identity (stub \u2014 real auth in issue #7).\n\nReturns:\n    :class:`IssuedRequestResponse` carrying the public form URL.\n\nRaises:\n    APIError: 404 if the referenced contact does not exist.",
-        "operationId": "issue_collection_request_collection_requests_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/IssueRequestBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/IssuedRequestResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/form/{token}": {
-      "get": {
-        "tags": [
-          "form"
-        ],
-        "summary": "Fetch metadata for a self-serve form",
-        "description": "Return enough info for the frontend to render the form.\n\nArgs:\n    token: Raw signed token from the URL path.\n    service: Injected :class:`CollectionRequestService`.\n    limiter: Injected per-token rate limiter.\n\nReturns:\n    :class:`FormMetadataResponse` describing the form for this token.\n\nRaises:\n    APIError: 404 if the token is invalid, 410 if expired/used, 429 if\n        rate-limited.",
-        "operationId": "get_form_metadata_form__token__get",
-        "parameters": [
-          {
-            "name": "token",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Token"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/FormMetadataResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Token unknown or malformed"
-          },
-          "410": {
-            "description": "Token expired or request already fulfilled"
-          },
-          "429": {
-            "description": "Rate limit exceeded for this token"
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      },
-      "post": {
-        "tags": [
-          "form"
-        ],
-        "summary": "Submit the self-serve form",
-        "description": "Persist the contact's submission and mark the request fulfilled.\n\nArgs:\n    token: Raw signed token from the URL path.\n    body: Validated submission payload.\n    service: Injected :class:`CollectionRequestService`.\n    limiter: Injected per-token rate limiter.\n\nRaises:\n    APIError: 404 if token/contact missing, 410 if expired/used, 429\n        if rate-limited.",
-        "operationId": "submit_form_form__token__post",
-        "parameters": [
-          {
-            "name": "token",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Token"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/FormSubmissionBody"
-              }
-            }
-          }
-        },
-        "responses": {
-          "204": {
-            "description": "Successful Response"
-          },
-          "404": {
-            "description": "Token unknown or contact missing"
-          },
-          "410": {
-            "description": "Token expired or request already fulfilled"
-          },
-          "429": {
-            "description": "Rate limit exceeded for this token"
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-  },
-  "components": {
-    "schemas": {
-      "Address": {
-        "properties": {
-          "street1": {
-            "type": "string",
-            "maxLength": 200,
-            "minLength": 1,
-            "title": "Street1"
-          },
-          "street2": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 200
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Street2"
-          },
-          "city": {
-            "type": "string",
-            "maxLength": 100,
-            "minLength": 1,
-            "title": "City"
-          },
-          "region": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 100
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Region"
-          },
-          "postal_code": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 20
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Postal Code"
-          },
-          "country": {
-            "type": "string",
-            "maxLength": 2,
-            "minLength": 2,
-            "title": "Country",
-            "default": "US"
-          }
-        },
-        "type": "object",
-        "required": [
-          "street1",
-          "city"
-        ],
-        "title": "Address",
-        "description": "A postal address.\n\nValidation is intentionally permissive \u2014 we accept addresses from any\ncountry and do not normalize or geocode. The only hard requirements are a\nnon-empty first street line and a city; everything else is optional because\ncontacts will fill this in via a self-serve form and we do not want to\nblock them on, for example, an unfamiliar postal-code format.\n\nAttributes:\n    street1: First line of the street address (e.g. ``\"123 Main St\"``).\n    street2: Optional second line (apartment, suite, etc.).\n    city: City or locality name.\n    region: State, province, or region. Optional because some countries\n        (e.g. Singapore) do not use one.\n    postal_code: ZIP / postcode. Optional for the same reason.\n    country: ISO 3166-1 alpha-2 country code, uppercased. Defaults to\n        ``\"US\"`` since this is a personal-use app."
-      },
-      "Birthday": {
-        "properties": {
-          "month": {
-            "type": "integer",
-            "maximum": 12.0,
-            "minimum": 1.0,
-            "title": "Month"
-          },
-          "day": {
-            "type": "integer",
-            "maximum": 31.0,
-            "minimum": 1.0,
-            "title": "Day"
-          },
-          "year": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "minimum": 1900.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Year"
-          }
-        },
-        "type": "object",
-        "required": [
-          "month",
-          "day"
-        ],
-        "title": "Birthday",
-        "description": "Month, day, and optional year of a person's birthday.\n\nAttributes:\n    month: Calendar month, 1 (January) through 12 (December).\n    day: Day of the month, 1 through 31. Validated against ``month``\n        (and ``year`` when present) so impossible dates are rejected.\n    year: Four-digit Gregorian year, or ``None`` if unknown / withheld.\n        Constrained to a sensible human range (1900\u2013current year)."
-      },
-      "Channel": {
-        "type": "string",
-        "enum": [
-          "sms",
-          "email"
-        ],
-        "title": "Channel",
-        "description": "Channel used to deliver a collection request to a contact."
-      },
-      "ContactResponse": {
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid",
-            "title": "Id"
-          },
-          "full_name": {
-            "type": "string",
-            "title": "Full Name"
-          },
-          "preferred_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Preferred Name"
-          },
-          "email": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Email"
-          },
-          "phone": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Phone"
-          },
-          "address": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Address"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "birthday": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Birthday"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "created_at": {
-            "type": "string",
-            "title": "Created At",
-            "description": "ISO-8601 UTC creation timestamp."
-          },
-          "updated_at": {
-            "type": "string",
-            "title": "Updated At",
-            "description": "ISO-8601 UTC last-updated timestamp."
-          },
-          "days_until_birthday": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Days Until Birthday",
-            "description": "Days until the next occurrence of the contact's birthday, or null."
-          }
-        },
-        "type": "object",
-        "required": [
-          "id",
-          "full_name",
-          "preferred_name",
-          "email",
-          "phone",
-          "address",
-          "birthday",
-          "created_at",
-          "updated_at"
-        ],
-        "title": "ContactResponse",
-        "description": "Wire representation of a :class:`~birthday_tracker.models.Contact`.\n\nMatches the :class:`Contact` fields but uses ``str`` for UUID/datetime\nso JSON serialization is explicit and stable across Python versions."
-      },
-      "CreateContactBody": {
-        "properties": {
-          "full_name": {
-            "type": "string",
-            "maxLength": 200,
-            "minLength": 1,
-            "title": "Full Name",
-            "description": "Full name."
-          },
-          "preferred_name": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 100
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Preferred Name",
-            "description": "Nickname used in greetings."
-          },
-          "email": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "email"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Email",
-            "description": "Email address."
-          },
-          "phone": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Phone",
-            "description": "Phone number (E.164)."
-          },
-          "address": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Address"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Postal address."
-          },
-          "birthday": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Birthday"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Birthday."
-          }
-        },
-        "type": "object",
-        "required": [
-          "full_name"
-        ],
-        "title": "CreateContactBody",
-        "description": "Request body for ``POST /contacts``."
-      },
-      "FormMetadataResponse": {
-        "properties": {
-          "greeting_name": {
-            "type": "string",
-            "title": "Greeting Name"
-          },
-          "channel": {
-            "type": "string",
-            "title": "Channel"
-          },
-          "expires_at": {
-            "type": "string",
-            "title": "Expires At"
-          }
-        },
-        "type": "object",
-        "required": [
-          "greeting_name",
-          "channel",
-          "expires_at"
-        ],
-        "title": "FormMetadataResponse",
-        "description": "Returned by ``GET /form/{token}``.\n\nAttributes:\n    greeting_name: First-name-style label safe to show in the form\n        header. We never expose contact secrets via the public form.\n    channel: Channel used to deliver the link.\n    expires_at: ISO-8601 expiry timestamp."
-      },
-      "FormSubmissionBody": {
-        "properties": {
-          "full_name": {
-            "type": "string",
-            "maxLength": 200,
-            "minLength": 1,
-            "title": "Full Name"
-          },
-          "preferred_name": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 100
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Preferred Name"
-          },
-          "address": {
-            "$ref": "#/components/schemas/Address"
-          },
-          "birthday": {
-            "$ref": "#/components/schemas/Birthday"
-          }
-        },
-        "type": "object",
-        "required": [
-          "full_name",
-          "address",
-          "birthday"
-        ],
-        "title": "FormSubmissionBody",
-        "description": "Validated payload accepted by ``POST /form/{token}``."
-      },
-      "HTTPValidationError": {
-        "properties": {
-          "detail": {
-            "items": {
-              "$ref": "#/components/schemas/ValidationError"
-            },
-            "type": "array",
-            "title": "Detail"
-          }
-        },
-        "type": "object",
-        "title": "HTTPValidationError"
-      },
-      "HealthResponse": {
-        "properties": {
-          "status": {
-            "type": "string",
-            "title": "Status"
-          },
-          "version": {
-            "type": "string",
-            "title": "Version"
-          }
-        },
-        "type": "object",
-        "required": [
-          "status",
-          "version"
-        ],
-        "title": "HealthResponse",
-        "description": "Payload returned by :func:`get_health`.\n\nAttributes:\n    status: Always ``\"ok\"`` when the process can serve a response.\n    version: Package version string for the running build."
-      },
-      "IssueRequestBody": {
-        "properties": {
-          "contact_id": {
-            "type": "string",
-            "format": "uuid",
-            "title": "Contact Id",
-            "description": "ID of the contact this request is for."
-          },
-          "channel": {
-            "$ref": "#/components/schemas/Channel",
-            "description": "Delivery channel for the form link."
-          },
-          "destination": {
-            "type": "string",
-            "maxLength": 320,
-            "minLength": 1,
-            "title": "Destination",
-            "description": "Phone number (E.164) or email address the link will be sent to."
-          }
-        },
-        "type": "object",
-        "required": [
-          "contact_id",
-          "channel",
-          "destination"
-        ],
-        "title": "IssueRequestBody",
-        "description": "Request body for ``POST /collection-requests``."
-      },
-      "IssuedRequestResponse": {
-        "properties": {
-          "request_id": {
-            "type": "string",
-            "format": "uuid",
-            "title": "Request Id",
-            "description": "ID of the persisted CollectionRequest."
-          },
-          "contact_id": {
-            "type": "string",
-            "format": "uuid",
-            "title": "Contact Id"
-          },
-          "channel": {
-            "$ref": "#/components/schemas/Channel"
-          },
-          "destination": {
-            "type": "string",
-            "title": "Destination"
-          },
-          "expires_at": {
-            "type": "string",
-            "title": "Expires At",
-            "description": "ISO-8601 expiry timestamp."
-          },
-          "form_url": {
-            "type": "string",
-            "title": "Form Url",
-            "description": "Public URL to send to the contact."
-          }
-        },
-        "type": "object",
-        "required": [
-          "request_id",
-          "contact_id",
-          "channel",
-          "destination",
-          "expires_at",
-          "form_url"
-        ],
-        "title": "IssuedRequestResponse",
-        "description": "Response body returned by ``POST /collection-requests``."
-      },
-      "ReadinessResponse": {
-        "properties": {
-          "status": {
-            "type": "string",
-            "title": "Status"
-          },
-          "firestore": {
-            "type": "string",
-            "title": "Firestore"
-          }
-        },
-        "type": "object",
-        "required": [
-          "status",
-          "firestore"
-        ],
-        "title": "ReadinessResponse",
-        "description": "Payload returned by :func:`get_ready`.\n\nAttributes:\n    status: ``\"ready\"`` on success, ``\"not_ready\"`` on failure.\n    firestore: ``\"ok\"`` or a short failure description."
-      },
-      "UpdateContactBody": {
-        "properties": {
-          "full_name": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 200,
-                "minLength": 1
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Full Name"
-          },
-          "preferred_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Preferred Name"
-          },
-          "email": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "email"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Email"
-          },
-          "phone": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Phone"
-          },
-          "address": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Address"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "birthday": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Birthday"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "type": "object",
-        "title": "UpdateContactBody",
-        "description": "Request body for ``PUT /contacts/{contact_id}``.\n\nAll fields are optional; only supplied fields are applied."
-      },
-      "ValidationError": {
-        "properties": {
-          "loc": {
-            "items": {
-              "anyOf": [
-                {
-                  "type": "string"
+            "put": {
+                "tags": [
+                    "contacts"
+                ],
+                "summary": "Update a contact",
+                "description": "Apply a partial update to one of the caller's contacts.\n\nOnly fields explicitly included in ``body`` are changed; omitted fields\nretain their current values. ``owner_id`` cannot be modified.\n\nArgs:\n    contact_id: UUID of the contact to update.\n    body: Partial update payload.\n    repo: Injected :class:`ContactRepository`.\n    identity: Authenticated caller \u2014 must own the contact.\n\nReturns:\n    The updated :class:`ContactResponse`.\n\nRaises:\n    APIError: 404 if no contact with ``contact_id`` is owned by the caller.",
+                "operationId": "update_contact_contacts__contact_id__put",
+                "parameters": [
+                    {
+                        "name": "contact_id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "format": "uuid",
+                            "title": "Contact Id"
+                        }
+                    },
+                    {
+                        "name": "authorization",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "default": "",
+                            "title": "Authorization"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/UpdateContactBody"
+                            }
+                        }
+                    }
                 },
-                {
-                  "type": "integer"
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ContactResponse"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
                 }
-              ]
             },
-            "type": "array",
-            "title": "Location"
-          },
-          "msg": {
-            "type": "string",
-            "title": "Message"
-          },
-          "type": {
-            "type": "string",
-            "title": "Error Type"
-          },
-          "input": {
-            "title": "Input"
-          },
-          "ctx": {
-            "type": "object",
-            "title": "Context"
-          }
+            "delete": {
+                "tags": [
+                    "contacts"
+                ],
+                "summary": "Delete a contact",
+                "description": "Remove one of the caller's contacts permanently.\n\nArgs:\n    contact_id: UUID of the contact to delete.\n    repo: Injected :class:`ContactRepository`.\n    identity: Authenticated caller.\n\nRaises:\n    APIError: 404 if no contact with ``contact_id`` is owned by the caller.",
+                "operationId": "delete_contact_contacts__contact_id__delete",
+                "parameters": [
+                    {
+                        "name": "contact_id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "format": "uuid",
+                            "title": "Contact Id"
+                        }
+                    },
+                    {
+                        "name": "authorization",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "default": "",
+                            "title": "Authorization"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "Successful Response"
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         },
-        "type": "object",
-        "required": [
-          "loc",
-          "msg",
-          "type"
-        ],
-        "title": "ValidationError"
-      }
+        "/collection-requests": {
+            "post": {
+                "tags": [
+                    "collection-requests"
+                ],
+                "summary": "Issue a new collection request",
+                "description": "Mint a token and persist a pending collection request for the caller.\n\nArgs:\n    body: Request payload with ``contact_id``, ``channel``, ``destination``.\n    service: Injected :class:`CollectionRequestService`.\n    identity: Authenticated caller \u2014 must own the referenced contact.\n\nReturns:\n    :class:`IssuedRequestResponse` carrying the public form URL.\n\nRaises:\n    APIError: 404 if no contact with ``contact_id`` is owned by the caller\n        (this includes the case where the contact exists for a different\n        user \u2014 we do not leak existence across tenants).",
+                "operationId": "issue_collection_request_collection_requests_post",
+                "parameters": [
+                    {
+                        "name": "authorization",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "default": "",
+                            "title": "Authorization"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/IssueRequestBody"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/IssuedRequestResponse"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/form/{token}": {
+            "get": {
+                "tags": [
+                    "form"
+                ],
+                "summary": "Fetch metadata for a self-serve form",
+                "description": "Return enough info for the frontend to render the form.\n\nArgs:\n    token: Raw signed token from the URL path.\n    service: Injected :class:`CollectionRequestService`.\n    limiter: Injected per-token rate limiter.\n\nReturns:\n    :class:`FormMetadataResponse` describing the form for this token.\n\nRaises:\n    APIError: 404 if the token is invalid, 410 if expired/used, 429 if\n        rate-limited.",
+                "operationId": "get_form_metadata_form__token__get",
+                "parameters": [
+                    {
+                        "name": "token",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "title": "Token"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/FormMetadataResponse"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Token unknown or malformed"
+                    },
+                    "410": {
+                        "description": "Token expired or request already fulfilled"
+                    },
+                    "429": {
+                        "description": "Rate limit exceeded for this token"
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "post": {
+                "tags": [
+                    "form"
+                ],
+                "summary": "Submit the self-serve form",
+                "description": "Persist the contact's submission and mark the request fulfilled.\n\nArgs:\n    token: Raw signed token from the URL path.\n    body: Validated submission payload.\n    service: Injected :class:`CollectionRequestService`.\n    limiter: Injected per-token rate limiter.\n\nRaises:\n    APIError: 404 if token/contact missing, 410 if expired/used, 429\n        if rate-limited.",
+                "operationId": "submit_form_form__token__post",
+                "parameters": [
+                    {
+                        "name": "token",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "title": "Token"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/FormSubmissionBody"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "204": {
+                        "description": "Successful Response"
+                    },
+                    "404": {
+                        "description": "Token unknown or contact missing"
+                    },
+                    "410": {
+                        "description": "Token expired or request already fulfilled"
+                    },
+                    "429": {
+                        "description": "Rate limit exceeded for this token"
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/internal/digest/upcoming": {
+            "get": {
+                "tags": [
+                    "digest"
+                ],
+                "summary": "List one owner's upcoming birthdays (admin debug)",
+                "description": "Return the upcoming birthdays for a specific owner.\n\nIntended for debugging and Cloud Scheduler health-check probes.\nProtected by OIDC validation when configured; otherwise wide-open in\ndevelopment.\n\nArgs:\n    _auth: Resolved OIDC auth dependency (side-effect only).\n    repo: Injected contact repository.\n    owner_id: Firebase ``uid`` whose contacts to load.\n    days: Look-ahead window.\n\nReturns:\n    Sorted list of upcoming birthdays for the requested owner.",
+                "operationId": "get_upcoming_birthdays_internal_digest_upcoming_get",
+                "parameters": [
+                    {
+                        "name": "owner_id",
+                        "in": "query",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "description": "Firebase uid of the user to inspect.",
+                            "title": "Owner Id"
+                        },
+                        "description": "Firebase uid of the user to inspect."
+                    },
+                    {
+                        "name": "days",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "integer",
+                            "maximum": 365,
+                            "minimum": 0,
+                            "description": "Look-ahead window in days (inclusive).",
+                            "default": 14,
+                            "title": "Days"
+                        },
+                        "description": "Look-ahead window in days (inclusive)."
+                    },
+                    {
+                        "name": "authorization",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "default": "",
+                            "title": "Authorization"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DigestUpcomingResponse"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/internal/digest/send": {
+            "post": {
+                "tags": [
+                    "digest"
+                ],
+                "summary": "Send the daily digest email to every user",
+                "description": "Iterate every user profile and send each their own daily digest.\n\nCloud Scheduler should call this endpoint once per morning. Each user\nreceives a digest of their own contacts at their own preferred email.\nA failure for one user (e.g. Gmail API error) is logged and skipped\nso the rest of the fan-out still completes.\n\nArgs:\n    _auth: Resolved OIDC auth dependency.\n    contacts: Contact repository (used per-owner).\n    users: User repository \u2014 iterated to find every owner.\n    settings: Process settings (Gmail OAuth paths, from-address).\n    days: Look-ahead window in days.\n    today_override: Inject a fixed date for deterministic testing.\n\nReturns:\n    :class:`DigestSendResponse` summarising the fan-out outcome.",
+                "operationId": "send_digest_internal_digest_send_post",
+                "parameters": [
+                    {
+                        "name": "days",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "integer",
+                            "maximum": 365,
+                            "minimum": 0,
+                            "description": "Look-ahead window in days (inclusive).",
+                            "default": 14,
+                            "title": "Days"
+                        },
+                        "description": "Look-ahead window in days (inclusive)."
+                    },
+                    {
+                        "name": "today",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string",
+                                    "format": "date"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "description": "Override today's date (ISO 8601). Test use only.",
+                            "title": "Today"
+                        },
+                        "description": "Override today's date (ISO 8601). Test use only."
+                    },
+                    {
+                        "name": "authorization",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "default": "",
+                            "title": "Authorization"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DigestSendResponse"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/me": {
+            "get": {
+                "tags": [
+                    "users"
+                ],
+                "summary": "Get (or create) the caller's profile",
+                "description": "Return the caller's profile, creating it on first sign-in.\n\nArgs:\n    repo: Injected :class:`UserRepository`.\n    identity: Authenticated caller \u2014 supplies the ``uid`` and verified\n        email.\n\nReturns:\n    The :class:`UserProfileResponse` for the caller's profile.",
+                "operationId": "get_or_create_profile_me_get",
+                "parameters": [
+                    {
+                        "name": "authorization",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "default": "",
+                            "title": "Authorization"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/UserProfileResponse"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "put": {
+                "tags": [
+                    "users"
+                ],
+                "summary": "Update the caller's profile",
+                "description": "Apply a partial update to the caller's profile.\n\nArgs:\n    body: Partial update \u2014 only fields explicitly provided are applied.\n    repo: Injected :class:`UserRepository`.\n    identity: Authenticated caller.\n\nReturns:\n    The updated :class:`UserProfileResponse`.",
+                "operationId": "update_profile_me_put",
+                "parameters": [
+                    {
+                        "name": "authorization",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "default": "",
+                            "title": "Authorization"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/UpdateProfileBody"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/UserProfileResponse"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "components": {
+        "schemas": {
+            "Address": {
+                "properties": {
+                    "street1": {
+                        "type": "string",
+                        "maxLength": 200,
+                        "minLength": 1,
+                        "title": "Street1"
+                    },
+                    "street2": {
+                        "anyOf": [
+                            {
+                                "type": "string",
+                                "maxLength": 200
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Street2"
+                    },
+                    "city": {
+                        "type": "string",
+                        "maxLength": 100,
+                        "minLength": 1,
+                        "title": "City"
+                    },
+                    "region": {
+                        "anyOf": [
+                            {
+                                "type": "string",
+                                "maxLength": 100
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Region"
+                    },
+                    "postal_code": {
+                        "anyOf": [
+                            {
+                                "type": "string",
+                                "maxLength": 20
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Postal Code"
+                    },
+                    "country": {
+                        "type": "string",
+                        "maxLength": 2,
+                        "minLength": 2,
+                        "title": "Country",
+                        "default": "US"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "street1",
+                    "city"
+                ],
+                "title": "Address",
+                "description": "A postal address.\n\nValidation is intentionally permissive \u2014 we accept addresses from any\ncountry and do not normalize or geocode. The only hard requirements are a\nnon-empty first street line and a city; everything else is optional because\ncontacts will fill this in via a self-serve form and we do not want to\nblock them on, for example, an unfamiliar postal-code format.\n\nAttributes:\n    street1: First line of the street address (e.g. ``\"123 Main St\"``).\n    street2: Optional second line (apartment, suite, etc.).\n    city: City or locality name.\n    region: State, province, or region. Optional because some countries\n        (e.g. Singapore) do not use one.\n    postal_code: ZIP / postcode. Optional for the same reason.\n    country: ISO 3166-1 alpha-2 country code, uppercased. Defaults to\n        ``\"US\"`` since this is a personal-use app."
+            },
+            "Birthday": {
+                "properties": {
+                    "month": {
+                        "type": "integer",
+                        "maximum": 12.0,
+                        "minimum": 1.0,
+                        "title": "Month"
+                    },
+                    "day": {
+                        "type": "integer",
+                        "maximum": 31.0,
+                        "minimum": 1.0,
+                        "title": "Day"
+                    },
+                    "year": {
+                        "anyOf": [
+                            {
+                                "type": "integer",
+                                "minimum": 1900.0
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Year"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "month",
+                    "day"
+                ],
+                "title": "Birthday",
+                "description": "Month, day, and optional year of a person's birthday.\n\nAttributes:\n    month: Calendar month, 1 (January) through 12 (December).\n    day: Day of the month, 1 through 31. Validated against ``month``\n        (and ``year`` when present) so impossible dates are rejected.\n    year: Four-digit Gregorian year, or ``None`` if unknown / withheld.\n        Constrained to a sensible human range (1900\u2013current year)."
+            },
+            "Channel": {
+                "type": "string",
+                "enum": [
+                    "sms",
+                    "email"
+                ],
+                "title": "Channel",
+                "description": "Channel used to deliver a collection request to a contact."
+            },
+            "ContactResponse": {
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "format": "uuid",
+                        "title": "Id"
+                    },
+                    "full_name": {
+                        "type": "string",
+                        "title": "Full Name"
+                    },
+                    "preferred_name": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Preferred Name"
+                    },
+                    "email": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Email"
+                    },
+                    "phone": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Phone"
+                    },
+                    "address": {
+                        "anyOf": [
+                            {
+                                "$ref": "#/components/schemas/Address"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ]
+                    },
+                    "birthday": {
+                        "anyOf": [
+                            {
+                                "$ref": "#/components/schemas/Birthday"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ]
+                    },
+                    "created_at": {
+                        "type": "string",
+                        "title": "Created At",
+                        "description": "ISO-8601 UTC creation timestamp."
+                    },
+                    "updated_at": {
+                        "type": "string",
+                        "title": "Updated At",
+                        "description": "ISO-8601 UTC last-updated timestamp."
+                    },
+                    "days_until_birthday": {
+                        "anyOf": [
+                            {
+                                "type": "integer"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Days Until Birthday",
+                        "description": "Days until the next occurrence of the contact's birthday, or null."
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "id",
+                    "full_name",
+                    "preferred_name",
+                    "email",
+                    "phone",
+                    "address",
+                    "birthday",
+                    "created_at",
+                    "updated_at"
+                ],
+                "title": "ContactResponse",
+                "description": "Wire representation of a :class:`~birthday_tracker.models.Contact`.\n\nMatches the :class:`Contact` fields but uses ``str`` for UUID/datetime\nso JSON serialization is explicit and stable across Python versions.\nThe ``owner_id`` is intentionally not exposed on the wire \u2014 callers\nonly ever see their own contacts so it carries no useful information."
+            },
+            "ContactsPage": {
+                "properties": {
+                    "items": {
+                        "items": {
+                            "$ref": "#/components/schemas/ContactResponse"
+                        },
+                        "type": "array",
+                        "title": "Items"
+                    },
+                    "next_cursor": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Next Cursor"
+                    },
+                    "total": {
+                        "type": "integer",
+                        "title": "Total"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "items",
+                    "total"
+                ],
+                "title": "ContactsPage",
+                "description": "Paginated envelope for ``GET /contacts``.\n\nAttributes:\n    items: The contacts in the current page, in the route's sort order.\n    next_cursor: Opaque cursor for the next page (the last item's UUID\n        as a string), or ``None`` when no more pages remain.\n    total: Total number of contacts matching the current filter \u2014 the\n        full count, not the page length. Used by the UI for\n        ``Page X of Y`` displays."
+            },
+            "CreateContactBody": {
+                "properties": {
+                    "full_name": {
+                        "type": "string",
+                        "maxLength": 200,
+                        "minLength": 1,
+                        "title": "Full Name",
+                        "description": "Full name."
+                    },
+                    "preferred_name": {
+                        "anyOf": [
+                            {
+                                "type": "string",
+                                "maxLength": 100
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Preferred Name",
+                        "description": "Nickname used in greetings."
+                    },
+                    "email": {
+                        "anyOf": [
+                            {
+                                "type": "string",
+                                "format": "email"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Email",
+                        "description": "Email address."
+                    },
+                    "phone": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Phone",
+                        "description": "Phone number (E.164)."
+                    },
+                    "address": {
+                        "anyOf": [
+                            {
+                                "$ref": "#/components/schemas/Address"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "description": "Postal address."
+                    },
+                    "birthday": {
+                        "anyOf": [
+                            {
+                                "$ref": "#/components/schemas/Birthday"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "description": "Birthday."
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "full_name"
+                ],
+                "title": "CreateContactBody",
+                "description": "Request body for ``POST /contacts``.\n\nNote that ``owner_id`` is intentionally not a field \u2014 it is set\nserver-side from the authenticated identity so callers cannot\nimpersonate other users by spoofing it."
+            },
+            "DigestSendResponse": {
+                "properties": {
+                    "date": {
+                        "type": "string",
+                        "title": "Date"
+                    },
+                    "users": {
+                        "items": {
+                            "$ref": "#/components/schemas/DigestUserResult"
+                        },
+                        "type": "array",
+                        "title": "Users"
+                    },
+                    "delivered": {
+                        "type": "integer",
+                        "title": "Delivered"
+                    },
+                    "skipped": {
+                        "type": "integer",
+                        "title": "Skipped"
+                    },
+                    "failed": {
+                        "type": "integer",
+                        "title": "Failed"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "date",
+                    "users",
+                    "delivered",
+                    "skipped",
+                    "failed"
+                ],
+                "title": "DigestSendResponse",
+                "description": "Response body for ``POST /internal/digest/send``.\n\nAttributes:\n    date: The calendar date used as reference (ISO 8601).\n    users: Per-user outcome \u2014 one entry per known profile.\n    delivered: Total emails actually sent across all users.\n    skipped: Users who would have received a digest but the\n        per-process idempotency guard suppressed it.\n    failed: Users whose delivery raised an exception (continued)."
+            },
+            "DigestUpcomingResponse": {
+                "properties": {
+                    "owner_id": {
+                        "type": "string",
+                        "title": "Owner Id"
+                    },
+                    "days": {
+                        "type": "integer",
+                        "title": "Days"
+                    },
+                    "count": {
+                        "type": "integer",
+                        "title": "Count"
+                    },
+                    "items": {
+                        "items": {
+                            "$ref": "#/components/schemas/UpcomingBirthdayResponse"
+                        },
+                        "type": "array",
+                        "title": "Items"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "owner_id",
+                    "days",
+                    "count",
+                    "items"
+                ],
+                "title": "DigestUpcomingResponse",
+                "description": "Response body for ``GET /internal/digest/upcoming``.\n\nAttributes:\n    owner_id: Owner whose upcoming birthdays are listed.\n    days: The look-ahead window used.\n    count: Number of upcoming birthdays found.\n    items: The list of upcoming birthdays sorted by days_until."
+            },
+            "DigestUserResult": {
+                "properties": {
+                    "owner_id": {
+                        "type": "string",
+                        "title": "Owner Id"
+                    },
+                    "owner_email": {
+                        "type": "string",
+                        "title": "Owner Email"
+                    },
+                    "sent": {
+                        "type": "boolean",
+                        "title": "Sent"
+                    },
+                    "count": {
+                        "type": "integer",
+                        "title": "Count"
+                    },
+                    "error": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Error"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "owner_id",
+                    "owner_email",
+                    "sent",
+                    "count"
+                ],
+                "title": "DigestUserResult",
+                "description": "Per-user outcome inside :class:`DigestSendResponse`.\n\nAttributes:\n    owner_id: Firebase ``uid`` of the user this entry describes.\n    owner_email: Address the digest was (or would be) sent to.\n    sent: Whether an email was actually delivered.\n    count: Number of upcoming birthdays in the digest.\n    error: Failure message if delivery raised. ``None`` on success."
+            },
+            "FormMetadataResponse": {
+                "properties": {
+                    "greeting_name": {
+                        "type": "string",
+                        "title": "Greeting Name"
+                    },
+                    "channel": {
+                        "type": "string",
+                        "title": "Channel"
+                    },
+                    "expires_at": {
+                        "type": "string",
+                        "title": "Expires At"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "greeting_name",
+                    "channel",
+                    "expires_at"
+                ],
+                "title": "FormMetadataResponse",
+                "description": "Returned by ``GET /form/{token}``.\n\nAttributes:\n    greeting_name: First-name-style label safe to show in the form\n        header. We never expose contact secrets via the public form.\n    channel: Channel used to deliver the link.\n    expires_at: ISO-8601 expiry timestamp."
+            },
+            "FormSubmissionBody": {
+                "properties": {
+                    "full_name": {
+                        "type": "string",
+                        "maxLength": 200,
+                        "minLength": 1,
+                        "title": "Full Name"
+                    },
+                    "preferred_name": {
+                        "anyOf": [
+                            {
+                                "type": "string",
+                                "maxLength": 100
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Preferred Name"
+                    },
+                    "address": {
+                        "$ref": "#/components/schemas/Address"
+                    },
+                    "birthday": {
+                        "$ref": "#/components/schemas/Birthday"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "full_name",
+                    "address",
+                    "birthday"
+                ],
+                "title": "FormSubmissionBody",
+                "description": "Validated payload accepted by ``POST /form/{token}``."
+            },
+            "HTTPValidationError": {
+                "properties": {
+                    "detail": {
+                        "items": {
+                            "$ref": "#/components/schemas/ValidationError"
+                        },
+                        "type": "array",
+                        "title": "Detail"
+                    }
+                },
+                "type": "object",
+                "title": "HTTPValidationError"
+            },
+            "HealthResponse": {
+                "properties": {
+                    "status": {
+                        "type": "string",
+                        "title": "Status"
+                    },
+                    "version": {
+                        "type": "string",
+                        "title": "Version"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "status",
+                    "version"
+                ],
+                "title": "HealthResponse",
+                "description": "Payload returned by :func:`get_health`.\n\nAttributes:\n    status: Always ``\"ok\"`` when the process can serve a response.\n    version: Package version string for the running build."
+            },
+            "IssueRequestBody": {
+                "properties": {
+                    "contact_id": {
+                        "type": "string",
+                        "format": "uuid",
+                        "title": "Contact Id",
+                        "description": "ID of the contact this request is for."
+                    },
+                    "channel": {
+                        "$ref": "#/components/schemas/Channel",
+                        "description": "Delivery channel for the form link."
+                    },
+                    "destination": {
+                        "type": "string",
+                        "maxLength": 320,
+                        "minLength": 1,
+                        "title": "Destination",
+                        "description": "Phone number (E.164) or email address the link will be sent to."
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "contact_id",
+                    "channel",
+                    "destination"
+                ],
+                "title": "IssueRequestBody",
+                "description": "Request body for ``POST /collection-requests``."
+            },
+            "IssuedRequestResponse": {
+                "properties": {
+                    "request_id": {
+                        "type": "string",
+                        "format": "uuid",
+                        "title": "Request Id",
+                        "description": "ID of the persisted CollectionRequest."
+                    },
+                    "contact_id": {
+                        "type": "string",
+                        "format": "uuid",
+                        "title": "Contact Id"
+                    },
+                    "channel": {
+                        "$ref": "#/components/schemas/Channel"
+                    },
+                    "destination": {
+                        "type": "string",
+                        "title": "Destination"
+                    },
+                    "expires_at": {
+                        "type": "string",
+                        "title": "Expires At",
+                        "description": "ISO-8601 expiry timestamp."
+                    },
+                    "form_url": {
+                        "type": "string",
+                        "title": "Form Url",
+                        "description": "Public URL to send to the contact."
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "request_id",
+                    "contact_id",
+                    "channel",
+                    "destination",
+                    "expires_at",
+                    "form_url"
+                ],
+                "title": "IssuedRequestResponse",
+                "description": "Response body returned by ``POST /collection-requests``."
+            },
+            "ReadinessResponse": {
+                "properties": {
+                    "status": {
+                        "type": "string",
+                        "title": "Status"
+                    },
+                    "firestore": {
+                        "type": "string",
+                        "title": "Firestore"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "status",
+                    "firestore"
+                ],
+                "title": "ReadinessResponse",
+                "description": "Payload returned by :func:`get_ready`.\n\nAttributes:\n    status: ``\"ready\"`` on success, ``\"not_ready\"`` on failure.\n    firestore: ``\"ok\"`` or a short failure description."
+            },
+            "UpcomingBirthdayResponse": {
+                "properties": {
+                    "contact_id": {
+                        "type": "string",
+                        "title": "Contact Id"
+                    },
+                    "full_name": {
+                        "type": "string",
+                        "title": "Full Name"
+                    },
+                    "preferred_name": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Preferred Name"
+                    },
+                    "days_until": {
+                        "type": "integer",
+                        "title": "Days Until"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "contact_id",
+                    "full_name",
+                    "preferred_name",
+                    "days_until"
+                ],
+                "title": "UpcomingBirthdayResponse",
+                "description": "Wire representation of :class:`~birthday_tracker.services.digest.UpcomingBirthday`.\n\nAttributes:\n    contact_id: UUID string of the contact.\n    full_name: Contact's full legal name.\n    preferred_name: Nickname, if set.\n    days_until: Days until the next birthday occurrence (0 = today)."
+            },
+            "UpdateContactBody": {
+                "properties": {
+                    "full_name": {
+                        "anyOf": [
+                            {
+                                "type": "string",
+                                "maxLength": 200,
+                                "minLength": 1
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Full Name"
+                    },
+                    "preferred_name": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Preferred Name"
+                    },
+                    "email": {
+                        "anyOf": [
+                            {
+                                "type": "string",
+                                "format": "email"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Email"
+                    },
+                    "phone": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Phone"
+                    },
+                    "address": {
+                        "anyOf": [
+                            {
+                                "$ref": "#/components/schemas/Address"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ]
+                    },
+                    "birthday": {
+                        "anyOf": [
+                            {
+                                "$ref": "#/components/schemas/Birthday"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ]
+                    }
+                },
+                "type": "object",
+                "title": "UpdateContactBody",
+                "description": "Request body for ``PUT /contacts/{contact_id}``.\n\nAll fields are optional; only supplied fields are applied."
+            },
+            "UpdateProfileBody": {
+                "properties": {
+                    "digest_owner_email": {
+                        "anyOf": [
+                            {
+                                "type": "string",
+                                "format": "email"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Digest Owner Email",
+                        "description": "Where the daily digest should be delivered. Defaults to the sign-in email."
+                    },
+                    "digest_timezone": {
+                        "anyOf": [
+                            {
+                                "type": "string",
+                                "maxLength": 64
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Digest Timezone",
+                        "description": "IANA timezone name used for digest date math."
+                    }
+                },
+                "type": "object",
+                "title": "UpdateProfileBody",
+                "description": "Request body for ``PUT /me`` \u2014 both fields optional."
+            },
+            "UserProfileResponse": {
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "title": "Id"
+                    },
+                    "email": {
+                        "type": "string",
+                        "title": "Email"
+                    },
+                    "digest_owner_email": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Digest Owner Email"
+                    },
+                    "digest_timezone": {
+                        "type": "string",
+                        "title": "Digest Timezone"
+                    },
+                    "created_at": {
+                        "type": "string",
+                        "title": "Created At"
+                    },
+                    "updated_at": {
+                        "type": "string",
+                        "title": "Updated At"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "id",
+                    "email",
+                    "digest_owner_email",
+                    "digest_timezone",
+                    "created_at",
+                    "updated_at"
+                ],
+                "title": "UserProfileResponse",
+                "description": "Wire representation of :class:`~birthday_tracker.models.User`."
+            },
+            "ValidationError": {
+                "properties": {
+                    "loc": {
+                        "items": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "integer"
+                                }
+                            ]
+                        },
+                        "type": "array",
+                        "title": "Location"
+                    },
+                    "msg": {
+                        "type": "string",
+                        "title": "Message"
+                    },
+                    "type": {
+                        "type": "string",
+                        "title": "Error Type"
+                    },
+                    "input": {
+                        "title": "Input"
+                    },
+                    "ctx": {
+                        "type": "object",
+                        "title": "Context"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "loc",
+                    "msg",
+                    "type"
+                ],
+                "title": "ValidationError"
+            }
+        }
     }
-  }
 }

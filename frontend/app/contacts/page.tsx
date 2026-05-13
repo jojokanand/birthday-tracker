@@ -67,9 +67,14 @@ function ContactsContent() {
     if (!isAuthed) return;
     let alive = true;
     (async () => {
-      const { data, error } = await api.GET("/contacts", {});
+      // Pull a generous page so the existing all-at-once UI keeps
+      // working until the contacts list grows its own pagination
+      // (tracked separately).
+      const { data, error } = await api.GET("/contacts", {
+        params: { query: { limit: 100 } },
+      });
       if (!alive) return;
-      setContacts(error ? [] : (data ?? []));
+      setContacts(error ? [] : (data?.items ?? []));
       setLoading(false);
     })();
     return () => {
