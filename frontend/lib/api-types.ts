@@ -206,11 +206,18 @@ export interface paths {
          *         requests: Injected :class:`CollectionRequestRepository` — used to
          *             roll back the persisted request if the notifier fails so we
          *             never leave a request the contact never received.
+         *         contacts: Injected :class:`ContactRepository` — used by the
+         *             ``send=true`` path to look up the contact's first name for
+         *             the email greeting.
          *         sms: Configured :class:`SmsNotifier`, or ``None`` when the
          *             Twilio settings are unset on the running service.
          *         email: Configured :class:`EmailNotifier`, or ``None`` when the
          *             Gmail settings are unset on the running service.
+         *         settings: Injected :class:`Settings` — used to build the
+         *             "Sign up here" URL out of ``public_base_url``.
          *         identity: Authenticated caller — must own the referenced contact.
+         *             ``identity.display_name`` is the source for the owner's
+         *             first name in the email subject + body.
          *
          *     Returns:
          *         :class:`IssuedRequestResponse` with the form URL and a ``sent``
@@ -794,12 +801,34 @@ export interface components {
         /**
          * UserProfileResponse
          * @description Wire representation of :class:`~birthday_tracker.models.User`.
+         *
+         *     Identity-derived fields (``first_name``, ``last_name``, ``phone``)
+         *     come straight from the verified Firebase token on every request —
+         *     they are not persisted in the User document, so editing them is a
+         *     Firebase / Google account concern, not an app concern. Persisted
+         *     fields (``digest_*``) live on the User row and can be updated via
+         *     ``PUT /me``.
          */
         UserProfileResponse: {
             /** Id */
             id: string;
             /** Email */
             email: string;
+            /**
+             * First Name
+             * @description Owner's first name, derived from the Firebase display name.
+             */
+            first_name: string | null;
+            /**
+             * Last Name
+             * @description Owner's last name (joined remainder of the display name).
+             */
+            last_name: string | null;
+            /**
+             * Phone
+             * @description Phone number from the Firebase token, or ``None`` when unset.
+             */
+            phone: string | null;
             /** Digest Owner Email */
             digest_owner_email: string | null;
             /** Digest Timezone */

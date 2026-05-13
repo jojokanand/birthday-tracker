@@ -118,3 +118,38 @@ def test_verify_treats_blank_or_non_string_name_as_absent(value: object) -> None
 def test_dev_identity_has_display_name() -> None:
     """Dev mode supplies a placeholder name so local emails read naturally."""
     assert dev_identity().display_name == "Dev User"
+
+
+@pytest.mark.unit
+def test_verify_carries_phone_number_when_present() -> None:
+    """The Firebase ``phone_number`` claim flows onto ``Identity.phone_number``."""
+    decoded = {
+        "uid": "abc",
+        "email": "alice@example.com",
+        "phone_number": "+14155551234",
+    }
+    with (
+        patch("birthday_tracker.core.auth._ensure_firebase_initialized"),
+        patch("firebase_admin.auth.verify_id_token", return_value=decoded),
+    ):
+        ident = verify_firebase_id_token("token")
+
+    assert ident.phone_number == "+14155551234"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("value", [None, "", "   ", 5551234])
+def test_verify_treats_blank_or_non_string_phone_as_absent(value: object) -> None:
+    """Empty / non-string phone_number collapses to ``None``."""
+    decoded = {
+        "uid": "abc",
+        "email": "alice@example.com",
+        "phone_number": value,
+    }
+    with (
+        patch("birthday_tracker.core.auth._ensure_firebase_initialized"),
+        patch("firebase_admin.auth.verify_id_token", return_value=decoded),
+    ):
+        ident = verify_firebase_id_token("token")
+
+    assert ident.phone_number is None

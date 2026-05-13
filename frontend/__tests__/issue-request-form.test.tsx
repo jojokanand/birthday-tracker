@@ -190,9 +190,7 @@ describe("IssueRequestForm", () => {
       response: { status: 503 },
     });
 
-    const { container } = render(
-      <IssueRequestForm contacts={CONTACTS} initialContactId={CHARLES_ID} />,
-    );
+    render(<IssueRequestForm contacts={CONTACTS} initialContactId={CHARLES_ID} />);
     // Charles has a phone, no email — channel defaults to sms.
     fireEvent.click(screen.getByRole("button", { name: /send via sms/i }));
 

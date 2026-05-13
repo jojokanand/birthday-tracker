@@ -24,10 +24,27 @@ router = APIRouter(prefix="/me", tags=["users"])
 
 
 class UserProfileResponse(BaseModel):
-    """Wire representation of :class:`~birthday_tracker.models.User`."""
+    """Wire representation of :class:`~birthday_tracker.models.User`.
+
+    Identity-derived fields (``first_name``, ``last_name``, ``phone``)
+    come straight from the verified Firebase token on every request —
+    they are not persisted in the User document, so editing them is a
+    Firebase / Google account concern, not an app concern. Persisted
+    fields (``digest_*``) live on the User row and can be updated via
+    ``PUT /me``.
+    """
 
     id: str
     email: str
+    first_name: str | None = Field(
+        description="Owner's first name, derived from the Firebase display name."
+    )
+    last_name: str | None = Field(
+        description="Owner's last name (joined remainder of the display name)."
+    )
+    phone: str | None = Field(
+        description="Phone number from the Firebase token, or ``None`` when unset."
+    )
     digest_owner_email: str | None
     digest_timezone: str
     created_at: str
@@ -48,18 +65,46 @@ class UpdateProfileBody(BaseModel):
     )
 
 
-def _to_response(user: User) -> UserProfileResponse:
+def _split_display_name(display_name: str | None) -> tuple[str | None, str | None]:
+    """Split a Firebase display name into first / last components.
+
+    The first whitespace-separated token is the first name; everything
+    after is joined back together for the last name. Single-token names
+    yield ``(token, None)``. Empty / whitespace-only input yields
+    ``(None, None)``.
+
+    Args:
+        display_name: Raw Firebase ``name`` claim, or ``None``.
+
+    Returns:
+        ``(first_name, last_name)`` tuple of optional strings.
+    """
+    if not display_name or not display_name.strip():
+        return (None, None)
+    tokens = display_name.strip().split()
+    first = tokens[0]
+    last = " ".join(tokens[1:]) if len(tokens) > 1 else None
+    return (first, last)
+
+
+def _to_response(user: User, identity: Identity) -> UserProfileResponse:
     """Convert a :class:`User` to its wire representation.
 
     Args:
-        user: The persisted profile.
+        user: The persisted profile (digest_* fields, timestamps).
+        identity: Authenticated caller — supplies the identity-derived
+            fields (first name, last name, phone) on every request.
 
     Returns:
         A :class:`UserProfileResponse`.
     """
+    first_name, last_name = _split_display_name(identity.display_name)
     return UserProfileResponse(
         id=user.id,
         email=user.email,
+        first_name=first_name,
+        last_name=last_name,
+        phone=identity.phone_number,
         digest_owner_email=user.digest_owner_email,
         digest_timezone=user.digest_timezone,
         created_at=user.created_at.isoformat(),
@@ -90,7 +135,7 @@ async def get_or_create_profile(
     if user is None:
         user = User(id=identity.user_id, email=identity.email)
         await repo.save(user)
-    return _to_response(user)
+    return _to_response(user, identity)
 
 
 @router.put(
@@ -123,4 +168,4 @@ async def update_profile(
     updated = user.model_copy(update=updates)
     updated.updated_at = dt.datetime.now(dt.UTC)
     await repo.save(updated)
-    return _to_response(updated)
+    return _to_response(updated, identity)

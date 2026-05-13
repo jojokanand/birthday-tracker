@@ -387,7 +387,7 @@
                     "collection-requests"
                 ],
                 "summary": "Issue a new collection request",
-                "description": "Mint a signed form token, persist the request, and optionally deliver it.\n\nArgs:\n    body: ``contact_id``, ``channel``, ``destination``, plus the\n        optional ``send`` flag.\n    service: Injected :class:`CollectionRequestService`.\n    requests: Injected :class:`CollectionRequestRepository` \u2014 used to\n        roll back the persisted request if the notifier fails so we\n        never leave a request the contact never received.\n    sms: Configured :class:`SmsNotifier`, or ``None`` when the\n        Twilio settings are unset on the running service.\n    email: Configured :class:`EmailNotifier`, or ``None`` when the\n        Gmail settings are unset on the running service.\n    identity: Authenticated caller \u2014 must own the referenced contact.\n\nReturns:\n    :class:`IssuedRequestResponse` with the form URL and a ``sent``\n    flag indicating whether the notifier handoff succeeded.\n\nRaises:\n    APIError: 404 if the contact isn't owned by the caller; 503\n        when ``send=true`` but the matching notifier isn't\n        configured on this deployment; 502 when the notifier was\n        invoked but the upstream provider rejected the send (the\n        persisted request is rolled back so a retry can re-mint a\n        fresh token).",
+                "description": "Mint a signed form token, persist the request, and optionally deliver it.\n\nArgs:\n    body: ``contact_id``, ``channel``, ``destination``, plus the\n        optional ``send`` flag.\n    service: Injected :class:`CollectionRequestService`.\n    requests: Injected :class:`CollectionRequestRepository` \u2014 used to\n        roll back the persisted request if the notifier fails so we\n        never leave a request the contact never received.\n    contacts: Injected :class:`ContactRepository` \u2014 used by the\n        ``send=true`` path to look up the contact's first name for\n        the email greeting.\n    sms: Configured :class:`SmsNotifier`, or ``None`` when the\n        Twilio settings are unset on the running service.\n    email: Configured :class:`EmailNotifier`, or ``None`` when the\n        Gmail settings are unset on the running service.\n    settings: Injected :class:`Settings` \u2014 used to build the\n        \"Sign up here\" URL out of ``public_base_url``.\n    identity: Authenticated caller \u2014 must own the referenced contact.\n        ``identity.display_name`` is the source for the owner's\n        first name in the email subject + body.\n\nReturns:\n    :class:`IssuedRequestResponse` with the form URL and a ``sent``\n    flag indicating whether the notifier handoff succeeded.\n\nRaises:\n    APIError: 404 if the contact isn't owned by the caller; 503\n        when ``send=true`` but the matching notifier isn't\n        configured on this deployment; 502 when the notifier was\n        invoked but the upstream provider rejected the send (the\n        persisted request is rolled back so a retry can re-mint a\n        fresh token).",
                 "operationId": "issue_collection_request_collection_requests_post",
                 "parameters": [
                     {
@@ -1564,6 +1564,42 @@
                         "type": "string",
                         "title": "Email"
                     },
+                    "first_name": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "First Name",
+                        "description": "Owner's first name, derived from the Firebase display name."
+                    },
+                    "last_name": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Last Name",
+                        "description": "Owner's last name (joined remainder of the display name)."
+                    },
+                    "phone": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Phone",
+                        "description": "Phone number from the Firebase token, or ``None`` when unset."
+                    },
                     "digest_owner_email": {
                         "anyOf": [
                             {
@@ -1592,13 +1628,16 @@
                 "required": [
                     "id",
                     "email",
+                    "first_name",
+                    "last_name",
+                    "phone",
                     "digest_owner_email",
                     "digest_timezone",
                     "created_at",
                     "updated_at"
                 ],
                 "title": "UserProfileResponse",
-                "description": "Wire representation of :class:`~birthday_tracker.models.User`."
+                "description": "Wire representation of :class:`~birthday_tracker.models.User`.\n\nIdentity-derived fields (``first_name``, ``last_name``, ``phone``)\ncome straight from the verified Firebase token on every request \u2014\nthey are not persisted in the User document, so editing them is a\nFirebase / Google account concern, not an app concern. Persisted\nfields (``digest_*``) live on the User row and can be updated via\n``PUT /me``."
             },
             "ValidationError": {
                 "properties": {
