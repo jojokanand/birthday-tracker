@@ -169,7 +169,7 @@ export function buildBirthdayIcs(
   const lines = [
     "BEGIN:VCALENDAR",
     "VERSION:2.0",
-    "PRODID:-//Birthday Tracker//EN",
+    "PRODID:-//Birthday Genie//EN",
     "CALSCALE:GREGORIAN",
     "BEGIN:VEVENT",
     `UID:birthday-${contact.id}@birthday-tracker`,

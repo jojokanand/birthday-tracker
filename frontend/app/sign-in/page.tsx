@@ -56,7 +56,7 @@ export default function SignInPage() {
         <CardHeader className="text-center">
           <div className="flex items-center justify-center gap-2 mb-2">
             <Cake className="size-6 text-primary" />
-            <CardTitle>Birthday Tracker</CardTitle>
+            <CardTitle>Birthday Genie</CardTitle>
           </div>
           <CardDescription>
             Sign in to your account to manage your contacts.
