@@ -81,3 +81,40 @@ def test_verify_rejects_token_without_email() -> None:
         pytest.raises(ValueError, match="email"),
     ):
         verify_firebase_id_token("token")
+
+
+@pytest.mark.unit
+def test_verify_carries_display_name_when_present() -> None:
+    """The Firebase ``name`` claim flows onto ``Identity.display_name``."""
+    decoded = {
+        "uid": "abc",
+        "email": "alice@example.com",
+        "name": "Alice Lovelace",
+    }
+    with (
+        patch("birthday_tracker.core.auth._ensure_firebase_initialized"),
+        patch("firebase_admin.auth.verify_id_token", return_value=decoded),
+    ):
+        ident = verify_firebase_id_token("token")
+
+    assert ident.display_name == "Alice Lovelace"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("value", [None, "", "   ", 12345])
+def test_verify_treats_blank_or_non_string_name_as_absent(value: object) -> None:
+    """Empty / whitespace / non-string names collapse to ``None``."""
+    decoded = {"uid": "abc", "email": "alice@example.com", "name": value}
+    with (
+        patch("birthday_tracker.core.auth._ensure_firebase_initialized"),
+        patch("firebase_admin.auth.verify_id_token", return_value=decoded),
+    ):
+        ident = verify_firebase_id_token("token")
+
+    assert ident.display_name is None
+
+
+@pytest.mark.unit
+def test_dev_identity_has_display_name() -> None:
+    """Dev mode supplies a placeholder name so local emails read naturally."""
+    assert dev_identity().display_name == "Dev User"

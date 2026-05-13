@@ -26,13 +26,22 @@ class Identity:
             this is a fixed sentinel (``"dev-user"``) so test data is
             stable across runs.
         email: Email address Firebase verified for this user.
+        display_name: Owner's display name from the Firebase ``name``
+            claim (populated by Google sign-in). ``None`` for legacy
+            accounts that have no name on file. Optional so the dev
+            identity can omit it without breaking type checking.
     """
 
     user_id: str
     email: str
+    display_name: str | None = None
 
 
-_DEV_IDENTITY = Identity(user_id="dev-user", email="dev@example.com")
+_DEV_IDENTITY = Identity(
+    user_id="dev-user",
+    email="dev@example.com",
+    display_name="Dev User",
+)
 
 _firebase_init_lock = threading.Lock()
 _firebase_initialized = False
@@ -106,4 +115,9 @@ def verify_firebase_id_token(token: str) -> Identity:
         raise ValueError("token is missing 'uid' claim")
     if not isinstance(email, str) or not email:
         raise ValueError("token is missing 'email' claim")
-    return Identity(user_id=uid, email=email)
+    # The ``name`` claim is populated by Google sign-in (the only
+    # provider this app uses). Treat any non-string / empty value as
+    # absent so downstream code can fall back gracefully.
+    raw_name = decoded.get("name")
+    display_name = raw_name if isinstance(raw_name, str) and raw_name.strip() else None
+    return Identity(user_id=uid, email=email, display_name=display_name)

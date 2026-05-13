@@ -45,15 +45,25 @@ class SmsNotifier(Protocol):
 class EmailNotifier(Protocol):
     """Send a single email to one recipient."""
 
-    async def send(self, to: str, subject: str, html: str) -> str:
-        """Deliver an HTML email.
+    async def send(
+        self,
+        to: str,
+        subject: str,
+        html: str,
+        text: str | None = None,
+    ) -> str:
+        """Deliver an HTML email with an optional plain-text alternative.
 
         Args:
             to: Recipient email address. The caller is responsible for
                 validating the format.
             subject: Subject line. Avoid newlines.
-            html: HTML body. A plain-text fallback is generated automatically
-                by the underlying client where possible.
+            html: HTML body.
+            text: Plain-text alternative for clients that strip HTML.
+                When ``None``, implementations supply a generic
+                placeholder pointing the recipient at an HTML-capable
+                viewer — callers should pass real text whenever the
+                message has meaningful content past the markup.
 
         Returns:
             The provider's message identifier, useful for log correlation.

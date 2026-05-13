@@ -17,15 +17,18 @@ from fastapi import APIRouter, Depends, status
 from pydantic import BaseModel, Field
 
 from birthday_tracker.api.dependencies import (
+    get_app_settings,
     get_collection_request_repository,
     get_collection_request_service,
+    get_contact_repository,
     get_email_notifier,
     get_sms_notifier,
     require_user,
 )
 from birthday_tracker.api.errors import APIError
 from birthday_tracker.core.auth import Identity
-from birthday_tracker.models import Channel
+from birthday_tracker.core.config import Settings
+from birthday_tracker.models import Channel, Contact
 from birthday_tracker.services.collection_requests import (
     CollectionRequestService,
     ContactNotFound,
@@ -35,7 +38,10 @@ from birthday_tracker.services.notifiers import (
     NotificationError,
     SmsNotifier,
 )
-from birthday_tracker.services.repositories import CollectionRequestRepository
+from birthday_tracker.services.repositories import (
+    CollectionRequestRepository,
+    ContactRepository,
+)
 
 router = APIRouter(prefix="/collection-requests", tags=["collection-requests"])
 
@@ -79,18 +85,97 @@ class IssuedRequestResponse(BaseModel):
     )
 
 
-_FORM_LINK_SUBJECT = "Quick favour — share your birthday and address"
+_PRODUCT_NAME = "Birthday-Tracker"
+_OWNER_FALLBACK = "Someone"
+_CONTACT_FALLBACK = "there"
 
 
-def _email_body_html(form_url: str) -> str:
-    """Render the HTML body sent when ``send=true`` and channel is email."""
+def _first_token(value: str | None) -> str | None:
+    """Return the first whitespace-separated token of ``value``, trimmed.
+
+    Returns ``None`` when ``value`` is empty / whitespace-only so the
+    caller can chain through preferred-name → full-name → static
+    fallback without conditional ladders.
+    """
+    if not value:
+        return None
+    parts = value.strip().split()
+    return parts[0] if parts else None
+
+
+def _contact_first_name(contact: Contact) -> str:
+    """Best guess at how to address the contact in greetings.
+
+    Prefers :attr:`Contact.preferred_name` when set, then the first
+    token of :attr:`Contact.full_name`, and finally ``"there"`` so the
+    greeting never reads ``Hi !``.
+    """
     return (
-        "<p>Hi!</p>"
-        "<p>I'd like to keep your birthday and address handy so I don't "
-        "miss them. Please use the link below to share your details — it "
+        _first_token(contact.preferred_name) or _first_token(contact.full_name) or _CONTACT_FALLBACK
+    )
+
+
+def _owner_first_name(identity: Identity) -> str:
+    """Best guess at the owner's first name for the email subject + body.
+
+    Pulled from the Firebase ``name`` claim via
+    :attr:`Identity.display_name`. Falls back to ``"Someone"`` when the
+    claim is absent (legacy accounts; the dev identity supplies a
+    placeholder so local development still reads naturally).
+    """
+    return _first_token(identity.display_name) or _OWNER_FALLBACK
+
+
+def _email_subject(owner_first_name: str) -> str:
+    """Subject line: identifies the sender + the product."""
+    return f"{owner_first_name} is using {_PRODUCT_NAME} — share your birthday"
+
+
+def _email_body_html(
+    *,
+    form_url: str,
+    contact_first_name: str,
+    owner_first_name: str,
+    sign_up_url: str,
+) -> str:
+    """HTML body sent when ``send=true`` and channel is email."""
+    return (
+        f"<p>Hi {contact_first_name}!</p>"
+        f"<p>{owner_first_name} is using <strong>{_PRODUCT_NAME}</strong> "
+        "to keep birthdays and addresses for the people they care about. "
+        "They've asked you to share yours — please use this "
+        f'<a href="{form_url}">link</a> to fill in your details. It '
         "expires in 7 days and can only be used once.</p>"
-        f'<p><a href="{form_url}">{form_url}</a></p>'
+        '<p style="color:#666;font-size:0.9em">'
+        "If the link doesn't open, copy and paste this URL into your "
+        f"browser:<br/>{form_url}</p>"
+        '<hr style="border:0;border-top:1px solid #eee;margin:24px 0"/>'
+        '<p style="font-size:0.9em">'
+        f"Interested in checking out {_PRODUCT_NAME}? "
+        f'<a href="{sign_up_url}">Sign up here</a>.</p>'
         "<p>Thanks!</p>"
+    )
+
+
+def _email_body_text(
+    *,
+    form_url: str,
+    contact_first_name: str,
+    owner_first_name: str,
+    sign_up_url: str,
+) -> str:
+    """Plain-text alternative shipped alongside the HTML body."""
+    return (
+        f"Hi {contact_first_name}!\n\n"
+        f"{owner_first_name} is using {_PRODUCT_NAME} to keep birthdays "
+        "and addresses for the people they care about. They've asked "
+        "you to share yours — please use the link below to fill in "
+        "your details. It expires in 7 days and can only be used once.\n\n"
+        f"{form_url}\n\n"
+        "—\n\n"
+        f"Interested in checking out {_PRODUCT_NAME}? Sign up here:\n"
+        f"{sign_up_url}\n\n"
+        "Thanks!\n"
     )
 
 
@@ -115,8 +200,10 @@ async def issue_collection_request(
         CollectionRequestRepository,
         Depends(get_collection_request_repository),
     ],
+    contacts: Annotated[ContactRepository, Depends(get_contact_repository)],
     sms: Annotated[SmsNotifier | None, Depends(get_sms_notifier)],
     email: Annotated[EmailNotifier | None, Depends(get_email_notifier)],
+    settings: Annotated[Settings, Depends(get_app_settings)],
     identity: Annotated[Identity, Depends(require_user)],
 ) -> IssuedRequestResponse:
     """Mint a signed form token, persist the request, and optionally deliver it.
@@ -128,11 +215,18 @@ async def issue_collection_request(
         requests: Injected :class:`CollectionRequestRepository` — used to
             roll back the persisted request if the notifier fails so we
             never leave a request the contact never received.
+        contacts: Injected :class:`ContactRepository` — used by the
+            ``send=true`` path to look up the contact's first name for
+            the email greeting.
         sms: Configured :class:`SmsNotifier`, or ``None`` when the
             Twilio settings are unset on the running service.
         email: Configured :class:`EmailNotifier`, or ``None`` when the
             Gmail settings are unset on the running service.
+        settings: Injected :class:`Settings` — used to build the
+            "Sign up here" URL out of ``public_base_url``.
         identity: Authenticated caller — must own the referenced contact.
+            ``identity.display_name`` is the source for the owner's
+            first name in the email subject + body.
 
     Returns:
         :class:`IssuedRequestResponse` with the form URL and a ``sent``
@@ -162,11 +256,25 @@ async def issue_collection_request(
 
     sent = False
     if body.send:
+        # The contact existence was already verified by service.issue,
+        # so the fetch here is just to read it (re-uses the same repo).
+        # The token bearer credential bound to the request authorises
+        # the per-owner scope.
+        contact = await contacts.get(body.contact_id, identity.user_id)
+        if contact is None:  # pragma: no cover - service.issue would have failed
+            raise APIError(
+                status_code=status.HTTP_404_NOT_FOUND,
+                title="Contact not found",
+                detail=f"No contact with ID {body.contact_id}",
+            )
         try:
             await _deliver(
                 channel=body.channel,
                 destination=body.destination,
                 form_url=issued.url,
+                contact=contact,
+                identity=identity,
+                sign_up_url=settings.public_base_url,
                 sms=sms,
                 email=email,
             )
@@ -205,6 +313,9 @@ async def _deliver(
     channel: Channel,
     destination: str,
     form_url: str,
+    contact: Contact,
+    identity: Identity,
+    sign_up_url: str,
     sms: SmsNotifier | None,
     email: EmailNotifier | None,
 ) -> None:
@@ -228,10 +339,23 @@ async def _deliver(
                     "Gmail."
                 ),
             )
+        contact_first = _contact_first_name(contact)
+        owner_first = _owner_first_name(identity)
         await email.send(
             to=destination,
-            subject=_FORM_LINK_SUBJECT,
-            html=_email_body_html(form_url),
+            subject=_email_subject(owner_first),
+            html=_email_body_html(
+                form_url=form_url,
+                contact_first_name=contact_first,
+                owner_first_name=owner_first,
+                sign_up_url=sign_up_url,
+            ),
+            text=_email_body_text(
+                form_url=form_url,
+                contact_first_name=contact_first,
+                owner_first_name=owner_first,
+                sign_up_url=sign_up_url,
+            ),
         )
         return
     if channel is Channel.sms:
