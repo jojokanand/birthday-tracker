@@ -1,5 +1,6 @@
 /**
- * Contacts list page — shows the caller's contacts with add/delete actions.
+ * Contacts list page — shows the caller's contacts with create / edit /
+ * delete actions and a per-row "Send Request" link.
  *
  * @module
  */
@@ -8,8 +9,9 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { Users } from "lucide-react";
+import { Pencil, Trash2, Users } from "lucide-react";
 import { AuthGuard } from "@/components/auth-guard";
+import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -26,6 +28,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { CreateContactDialog } from "@/components/create-contact-dialog";
+import { DeleteContactDialog } from "@/components/delete-contact-dialog";
+import { EditContactDialog } from "@/components/edit-contact-dialog";
 import { useApiClient } from "@/lib/api-client";
 import { useAuth } from "@/lib/auth-context";
 import { formatBirthday, type ContactResponse } from "@/lib/format";
@@ -34,7 +38,8 @@ import { formatBirthday, type ContactResponse } from "@/lib/format";
  * Contacts list page.
  *
  * Fetches the caller's contacts client-side using the signed-in user's
- * ID token. The "Add contact" dialog refetches on success.
+ * ID token. The add / edit / delete dialogs all bump a refresh signal
+ * on success to re-fetch the list.
  */
 export default function ContactsPage() {
   return (
@@ -51,6 +56,13 @@ function ContactsContent() {
   const [loading, setLoading] = React.useState(true);
   const [refreshKey, setRefreshKey] = React.useState(0);
 
+  // Per-action dialog state.  Only one of the two row dialogs is open
+  // at a time, so a single ``activeContact`` value drives both.
+  const [editingContact, setEditingContact] =
+    React.useState<ContactResponse | null>(null);
+  const [deletingContact, setDeletingContact] =
+    React.useState<ContactResponse | null>(null);
+
   React.useEffect(() => {
     if (!isAuthed) return;
     let alive = true;
@@ -65,7 +77,7 @@ function ContactsContent() {
     };
   }, [api, isAuthed, refreshKey]);
 
-  const onCreated = React.useCallback(() => {
+  const refresh = React.useCallback(() => {
     setRefreshKey((k) => k + 1);
   }, []);
 
@@ -82,7 +94,7 @@ function ContactsContent() {
             {contacts.length} contact{contacts.length !== 1 ? "s" : ""} stored.
           </p>
         </div>
-        <CreateContactDialog onCreated={onCreated} />
+        <CreateContactDialog onCreated={refresh} />
       </div>
 
       {contacts.length === 0 ? (
@@ -136,12 +148,30 @@ function ContactsContent() {
                         : "—"}
                     </TableCell>
                     <TableCell>
-                      <Link
-                        href={`/contacts/new?contact_id=${c.id}`}
-                        className="inline-flex h-7 items-center rounded-[min(var(--radius-md),12px)] border border-border bg-background px-2.5 text-[0.8rem] font-medium text-foreground transition-colors hover:bg-muted"
-                      >
-                        Send Request
-                      </Link>
+                      <div className="flex items-center gap-1">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          aria-label={`Edit ${c.full_name}`}
+                          onClick={() => setEditingContact(c)}
+                        >
+                          <Pencil className="size-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          aria-label={`Delete ${c.full_name}`}
+                          onClick={() => setDeletingContact(c)}
+                        >
+                          <Trash2 className="size-4" />
+                        </Button>
+                        <Link
+                          href={`/contacts/new?contact_id=${c.id}`}
+                          className="inline-flex h-7 items-center rounded-[min(var(--radius-md),12px)] border border-border bg-background px-2.5 text-[0.8rem] font-medium text-foreground transition-colors hover:bg-muted"
+                        >
+                          Send Request
+                        </Link>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -150,6 +180,23 @@ function ContactsContent() {
           </CardContent>
         </Card>
       )}
+
+      <EditContactDialog
+        contact={editingContact}
+        open={editingContact !== null}
+        onOpenChange={(open) => {
+          if (!open) setEditingContact(null);
+        }}
+        onSaved={refresh}
+      />
+      <DeleteContactDialog
+        contact={deletingContact}
+        open={deletingContact !== null}
+        onOpenChange={(open) => {
+          if (!open) setDeletingContact(null);
+        }}
+        onDeleted={refresh}
+      />
     </div>
   );
 }
