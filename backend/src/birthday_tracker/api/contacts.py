@@ -336,8 +336,14 @@ async def update_contact(
             detail=f"No contact with ID {contact_id}",
         )
 
-    updates = body.model_dump(exclude_unset=True)
-    updated = contact.model_copy(update=updates)
+    # Re-validate through ``Contact.model_validate`` so nested fields
+    # (``address``, ``birthday``) come out as proper Pydantic instances
+    # rather than the plain dicts ``model_copy(update=...)`` would leave
+    # behind — otherwise the response serializer trips with
+    # ``PydanticSerializationUnexpectedValue`` and the route 500s.
+    patch = body.model_dump(exclude_unset=True)
+    merged = contact.model_dump() | patch
+    updated = Contact.model_validate(merged)
     updated.touch()
     await repo.save(updated)
     return _build_response(updated)
