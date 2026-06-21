@@ -15,8 +15,10 @@ import {
   cleanup,
 } from "@testing-library/react";
 import HomePage, {
+  CALENDAR_WINDOW_DAYS,
   WINDOW_PRESETS,
   resolveDays,
+  resolveView,
 } from "@/app/page";
 
 // ---------------------------------------------------------------------------
@@ -285,5 +287,90 @@ describe("HomePage pagination controls", () => {
         screen.getByText(/no upcoming birthdays in this window/i),
       ).toBeInTheDocument(),
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// resolveView
+// ---------------------------------------------------------------------------
+
+describe("resolveView", () => {
+  it('returns "list" for missing or unknown values', () => {
+    expect(resolveView(null)).toBe("list");
+    expect(resolveView(undefined)).toBe("list");
+    expect(resolveView("nonsense")).toBe("list");
+    expect(resolveView("list")).toBe("list");
+  });
+
+  it('returns "calendar" only for the exact value', () => {
+    expect(resolveView("calendar")).toBe("calendar");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// View toggle
+// ---------------------------------------------------------------------------
+
+describe("HomePage view toggle", () => {
+  it("writes ?view=calendar to the URL when Calendar is clicked", async () => {
+    mockGet.mockResolvedValueOnce(envelope(PAGE_1.slice(0, 3), 3));
+
+    render(<HomePage />);
+    await waitFor(() =>
+      expect(screen.getByLabelText(/calendar view/i)).toBeInTheDocument(),
+    );
+
+    fireEvent.click(screen.getByLabelText(/calendar view/i));
+
+    expect(mockReplace).toHaveBeenCalledWith("/?view=calendar");
+  });
+
+  it("removes ?view when switching back to List", async () => {
+    currentParams = new URLSearchParams("view=calendar");
+    mockGet.mockResolvedValueOnce(envelope(PAGE_1.slice(0, 3), 3));
+
+    render(<HomePage />);
+    await waitFor(() =>
+      expect(screen.getByLabelText(/list view/i)).toBeInTheDocument(),
+    );
+
+    fireEvent.click(screen.getByLabelText(/list view/i));
+
+    expect(mockReplace).toHaveBeenCalledWith("/");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Calendar view
+// ---------------------------------------------------------------------------
+
+describe("HomePage calendar view", () => {
+  it("fetches the full 30-day window in one unpaginated request", async () => {
+    currentParams = new URLSearchParams("view=calendar");
+    mockGet.mockResolvedValueOnce(envelope(PAGE_1.slice(0, 3), 3));
+
+    render(<HomePage />);
+
+    await waitFor(() => expect(mockGet).toHaveBeenCalledTimes(1));
+    expect(mockGet.mock.calls[0][1].params.query).toMatchObject({
+      upcoming_in_days: CALENDAR_WINDOW_DAYS,
+      limit: 100,
+    });
+    expect(mockGet.mock.calls[0][1].params.query.cursor).toBeUndefined();
+  });
+
+  it("renders the calendar grid and hides the window selector", async () => {
+    currentParams = new URLSearchParams("view=calendar");
+    mockGet.mockResolvedValueOnce(envelope(PAGE_1.slice(0, 3), 3));
+
+    render(<HomePage />);
+
+    await waitFor(() =>
+      expect(screen.getByTestId("upcoming-calendar")).toBeInTheDocument(),
+    );
+    // Window selector is list-only.
+    expect(screen.queryByLabelText(/birthday window/i)).not.toBeInTheDocument();
+    // Header reflects the fixed window.
+    expect(screen.getByText(/3 birthdays in the next 30 days/i)).toBeInTheDocument();
   });
 });

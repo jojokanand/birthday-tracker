@@ -3,10 +3,15 @@
  *
  * Client Component: data is loaded from the backend with the signed-in
  * user's ID token. Wrapped in `<AuthGuard>` so anonymous visitors are
- * sent to `/sign-in`. The window selector (7 days through 1 year) is
- * persisted to the URL as `?days=N` so refreshing or sharing the link
- * preserves the state. Pagination is server-side at 10 contacts per
- * page; "Page X of Y" is computed from the page envelope's `total`.
+ * sent to `/sign-in`.
+ *
+ * Two views, toggled via `?view=list|calendar` in the URL:
+ *
+ * - **List** (default) — paginated table over a configurable window
+ *   (`?days=N`, 7 days through 1 year). Pagination is server-side at 10
+ *   contacts per page; "Page X of Y" comes from the envelope's `total`.
+ * - **Calendar** — a fixed 30-day month grid (independent of `?days`),
+ *   fetched in a single request and bucketed by date.
  *
  * @module
  */
@@ -16,7 +21,12 @@
 import * as React from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { CalendarDays, ChevronLeft, ChevronRight } from "lucide-react";
+import {
+  CalendarDays,
+  ChevronLeft,
+  ChevronRight,
+  List as ListIcon,
+} from "lucide-react";
 import { AuthGuard } from "@/components/auth-guard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -42,6 +52,8 @@ import {
   formatDaysUntilBirthday,
   type ContactResponse,
 } from "@/lib/format";
+import { UpcomingCalendar } from "@/components/upcoming-calendar";
+import { buildUpcomingCalendar } from "@/lib/upcoming-calendar";
 
 /** Window presets surfaced in the selector. */
 export const WINDOW_PRESETS = [
@@ -57,6 +69,30 @@ const DEFAULT_DAYS = 30;
 
 /** Page size for the upcoming-birthdays table. */
 const PAGE_SIZE = 10;
+
+/** The two dashboard views, persisted to the URL as `?view=`. */
+export type DashboardView = "list" | "calendar";
+
+/** Fixed look-ahead window for the calendar view, in days. */
+export const CALENDAR_WINDOW_DAYS = 30;
+
+/**
+ * Upper bound on contacts fetched for the calendar grid in one request.
+ * The backend caps `limit` at 100; a 30-day personal birthday window is
+ * not expected to approach that, so the calendar skips pagination.
+ */
+const CALENDAR_FETCH_LIMIT = 100;
+
+/**
+ * Resolve the `?view=` URL value to a known {@link DashboardView}.
+ *
+ * Anything other than the literal `"calendar"` — including `null` — maps
+ * to `"list"`, so a missing or hand-edited param renders the default
+ * table view rather than erroring.
+ */
+export function resolveView(raw: string | null | undefined): DashboardView {
+  return raw === "calendar" ? "calendar" : "list";
+}
 
 /**
  * Resolve the window from a raw URL value to one of the {@link WINDOW_PRESETS}.
@@ -92,12 +128,188 @@ export default function HomePage() {
 
 /** Inner component rendered only after the user is signed in. */
 function HomeContent() {
-  const api = useApiClient();
   const router = useRouter();
   const searchParams = useSearchParams();
+
+  const view = resolveView(searchParams.get("view"));
+  const days = resolveDays(searchParams.get("days"));
+
+  const onChangeDays = (newDays: number) => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (newDays === DEFAULT_DAYS) params.delete("days");
+    else params.set("days", String(newDays));
+    const qs = params.toString();
+    router.replace(qs ? `/?${qs}` : "/");
+  };
+
+  const onChangeView = (newView: DashboardView) => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (newView === "list") params.delete("view");
+    else params.set("view", newView);
+    const qs = params.toString();
+    router.replace(qs ? `/?${qs}` : "/");
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">
+            Upcoming Birthdays
+          </h1>
+          <p className="text-muted-foreground text-sm mt-1">
+            {view === "calendar"
+              ? `Birthdays across the next ${CALENDAR_WINDOW_DAYS} days.`
+              : "Contacts with a birthday in the selected window."}
+          </p>
+        </div>
+        <div className="flex items-center gap-3 flex-wrap">
+          <ViewToggle view={view} onChange={onChangeView} />
+          {view === "list" && (
+            <div className="flex items-center gap-2">
+              <label
+                htmlFor="window-select"
+                className="text-sm text-muted-foreground"
+              >
+                Window
+              </label>
+              <select
+                id="window-select"
+                aria-label="Birthday window"
+                value={days}
+                onChange={(e) =>
+                  onChangeDays(Number.parseInt(e.target.value, 10))
+                }
+                className="h-8 rounded-lg border border-input bg-background px-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
+              >
+                {WINDOW_PRESETS.map((p) => (
+                  <option key={p.days} value={p.days}>
+                    {p.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {view === "calendar" ? <CalendarView /> : <ListView days={days} />}
+    </div>
+  );
+}
+
+/**
+ * List / Calendar segmented control. Writes the active view to the URL
+ * via the supplied `onChange` so it survives refresh and link sharing.
+ */
+function ViewToggle({
+  view,
+  onChange,
+}: {
+  view: DashboardView;
+  onChange: (view: DashboardView) => void;
+}) {
+  return (
+    <div
+      role="group"
+      aria-label="View"
+      className="inline-flex rounded-lg border border-input p-0.5"
+    >
+      <Button
+        variant={view === "list" ? "secondary" : "ghost"}
+        size="sm"
+        aria-pressed={view === "list"}
+        aria-label="List view"
+        onClick={() => onChange("list")}
+      >
+        <ListIcon className="size-4" />
+        List
+      </Button>
+      <Button
+        variant={view === "calendar" ? "secondary" : "ghost"}
+        size="sm"
+        aria-pressed={view === "calendar"}
+        aria-label="Calendar view"
+        onClick={() => onChange("calendar")}
+      >
+        <CalendarDays className="size-4" />
+        Calendar
+      </Button>
+    </div>
+  );
+}
+
+/**
+ * Calendar view — fetches every contact in the fixed
+ * {@link CALENDAR_WINDOW_DAYS} window in one request and renders the
+ * month grid. Unlike the list view it does not paginate; the window is
+ * small enough to fit under the backend's `limit` cap.
+ */
+function CalendarView() {
+  const api = useApiClient();
   const { isAuthed } = useAuth();
 
-  const days = resolveDays(searchParams.get("days"));
+  const [contacts, setContacts] = React.useState<ContactResponse[]>([]);
+  // Only flips post-await, mirroring the list view's derived-loading
+  // pattern so the effect body stays free of synchronous setState.
+  const [loaded, setLoaded] = React.useState(false);
+
+  React.useEffect(() => {
+    if (!isAuthed) return;
+    let alive = true;
+    (async () => {
+      const { data, error } = await api.GET("/contacts", {
+        params: {
+          query: {
+            upcoming_in_days: CALENDAR_WINDOW_DAYS,
+            limit: CALENDAR_FETCH_LIMIT,
+          },
+        },
+      });
+      if (!alive) return;
+      setContacts(error || !data ? [] : data.items);
+      setLoaded(true);
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [api, isAuthed]);
+
+  const weeks = React.useMemo(
+    () => buildUpcomingCalendar(new Date(), CALENDAR_WINDOW_DAYS, contacts),
+    [contacts],
+  );
+
+  if (!loaded) {
+    return (
+      <div className="text-sm text-muted-foreground">Loading calendar…</div>
+    );
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Next {CALENDAR_WINDOW_DAYS} days</CardTitle>
+        <CardDescription>
+          {contacts.length} birthday{contacts.length !== 1 ? "s" : ""} in the
+          next {CALENDAR_WINDOW_DAYS} days.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <UpcomingCalendar weeks={weeks} />
+      </CardContent>
+    </Card>
+  );
+}
+
+/**
+ * List view — paginated table of contacts whose birthday falls within
+ * the `days` window. Owns its own cursor-pagination state; the window
+ * value is supplied by the parent (sourced from `?days=N`).
+ */
+function ListView({ days }: { days: number }) {
+  const api = useApiClient();
+  const { isAuthed } = useAuth();
 
   const [contacts, setContacts] = React.useState<ContactResponse[]>([]);
   const [total, setTotal] = React.useState(0);
@@ -171,52 +383,12 @@ function HomeContent() {
     };
   }, [api, isAuthed, days, pageIndex, fetchKey]);
 
-  const onChangeDays = (newDays: number) => {
-    const params = new URLSearchParams(searchParams.toString());
-    if (newDays === DEFAULT_DAYS) params.delete("days");
-    else params.set("days", String(newDays));
-    const qs = params.toString();
-    router.replace(qs ? `/?${qs}` : "/");
-  };
-
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const hasNext = pageIndex + 1 < totalPages;
   const hasPrev = pageIndex > 0;
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-start justify-between gap-4 flex-wrap">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">
-            Upcoming Birthdays
-          </h1>
-          <p className="text-muted-foreground text-sm mt-1">
-            Contacts with a birthday in the selected window.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <label
-            htmlFor="window-select"
-            className="text-sm text-muted-foreground"
-          >
-            Window
-          </label>
-          <select
-            id="window-select"
-            aria-label="Birthday window"
-            value={days}
-            onChange={(e) => onChangeDays(Number.parseInt(e.target.value, 10))}
-            className="h-8 rounded-lg border border-input bg-background px-2 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 outline-none"
-          >
-            {WINDOW_PRESETS.map((p) => (
-              <option key={p.days} value={p.days}>
-                {p.label}
-              </option>
-            ))}
-          </select>
-        </div>
-      </div>
-
+    <>
       {loading ? (
         <div className="text-sm text-muted-foreground">Loading upcoming…</div>
       ) : total === 0 ? (
@@ -315,6 +487,6 @@ function HomeContent() {
           )}
         </Card>
       )}
-    </div>
+    </>
   );
 }
