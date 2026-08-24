@@ -14,7 +14,7 @@ All commands assume you are authenticated as a project Owner and that the
 export PROJECT_ID="your-gcp-project-id"
 export REGION="us-central1"           # Cloud Run + Artifact Registry region
 export REPO="birthday-tracker"        # Artifact Registry repository name
-export GITHUB_ORG="jyothsnakanand"   # GitHub org / username
+export GITHUB_ORG="jojokanand"   # GitHub org / username
 export GITHUB_REPO="birthday-tracker"
 export SA_NAME="birthday-tracker-deploy"
 ```
