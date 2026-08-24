@@ -3,6 +3,9 @@ name: deploy
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
 
 # These vars are set in the GitHub repo → Settings → Variables (Actions).
 # Secrets are set in Settings → Secrets → Actions.
