@@ -1,8 +1,16 @@
 # Birthday Tracker
 
-A personal birthday tracker that collects contact details (full name, preferred
-first name, address, birthday) by sending self-serve link requests via SMS or
-email, stores them in Firestore, and surfaces them in a dashboard.
+A cloud-native birthday and contact-management application that automates collecting and maintaining personal contact information. It sends self-service form links through SMS or email, validates submissions through a FastAPI service, stores records in Firestore, and surfaces them through a Next.js dashboard.
+
+## Engineering Highlights
+
+* FastAPI backend with Pydantic validation and documented OpenAPI endpoints
+* Next.js and TypeScript dashboard with a self-service data-collection flow
+* Firestore persistence with emulator-backed local development and testing
+* Twilio and Gmail API integrations for outbound collection requests
+* Automated backend and end-to-end testing with Pytest and Playwright
+* GitHub Actions CI/CD for Cloud Run, with secrets managed through Google Secret Manager
+
 
 ## Stack
 
