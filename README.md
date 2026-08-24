@@ -1,4 +1,5 @@
 # Birthday Tracker
+[![Deploy to Cloud Run](https://github.com/jojokanand/birthday-tracker/actions/workflows/deploy.yml/badge.svg)](https://github.com/jojokanand/birthday-tracker/actions/workflows/deploy.yml)
 
 A cloud-native birthday and contact-management application that automates collecting and maintaining personal contact information. It sends self-service form links through SMS or email, validates submissions through a FastAPI service, stores records in Firestore, and surfaces them through a Next.js dashboard.
 
