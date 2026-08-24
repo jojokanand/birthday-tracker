@@ -11,6 +11,19 @@ A cloud-native birthday and contact-management application that automates collec
 * Automated backend and end-to-end testing with Pytest and Playwright
 * GitHub Actions CI/CD for Cloud Run, with secrets managed through Google Secret Manager
 
+## Application Preview
+
+### Upcoming Birthdays
+
+![Upcoming birthdays dashboard showing scheduled birthdays](docs/screenshots/upcoming-birthdays.png)
+
+### Contacts Management
+
+![Contact-management dashboard with search and request actions](docs/screenshots/contacts.png)
+
+### Collection Requests
+
+![Email-based birthday collection-request workflow](docs/screenshots/send-request.png)
 
 ## Stack
 
