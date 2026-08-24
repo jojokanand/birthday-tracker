@@ -30,6 +30,27 @@ A cloud-native birthday and contact-management application that automates collec
 
 See [PROJECT_PLAN.md](PROJECT_PLAN.md) for the full plan and rationale.
 
+## Architecture
+
+```mermaid
+flowchart TD
+    Owner["Owner"] -->|"Uses dashboard"| Frontend["Next.js on Cloud Run"]
+    Contact["Contact"] -->|"Uses secure form"| Frontend
+    Frontend -->|"HTTPS"| Backend["FastAPI on Cloud Run"]
+    Scheduler["Cloud Scheduler"] -->|"Daily digest"| Backend
+    Secrets["Secret Manager"] -->|"Credentials"| Backend
+    Backend --> Firestore[("Firestore")]
+    Backend --> Messaging["Twilio and Gmail API"]
+    Messaging -->|"SMS or email"| Contact
+    Messaging -->|"Daily digest"| Owner
+```
+
+- The Next.js application provides the owner dashboard and token-protected self-service form.
+- FastAPI handles validation, request orchestration, business logic, and external-service adapters.
+- Firestore stores contact records and collection-request state.
+- Cloud Scheduler invokes the daily-digest workflow, while credentials remain in Google Secret Manager.
+- GitHub Actions tests, builds, and deploys the Cloud Run services.
+
 ## Local development
 
 ```bash
